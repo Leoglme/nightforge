@@ -74,22 +74,32 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/// Kill the running sidecar without blocking the UI thread (Windows kill can hang).
-fn kill_agent_async(state: &AgentProcess) {
+/// Stop the sidecar and wait until Windows releases the executable (required before updates).
+fn stop_agent_sidecar_sync(state: &AgentProcess) {
     let child = state.child.lock().unwrap().take();
     if let Some(child) = child {
-        thread::spawn(move || {
-            let _ = child.kill();
-        });
+        let _ = child.kill();
+        // NSIS cannot overwrite nightforge-agent.exe while the process is still exiting.
+        thread::sleep(Duration::from_millis(1200));
     }
+    state.set_error(None);
+}
+
+/// Stop the bundled agent so installers can replace `nightforge-agent.exe`.
+#[tauri::command]
+fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<AgentProcess>()
+        .ok_or_else(|| "Agent runtime not initialized".to_string())?;
+    stop_agent_sidecar_sync(&state);
+    Ok(())
 }
 
 /// Kill the running sidecar (if any) and start a fresh agent process.
 #[tauri::command]
 fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
-        kill_agent_async(&state);
-        thread::sleep(Duration::from_millis(400));
+        stop_agent_sidecar_sync(&state);
     }
     spawn_agent(&app)
 }
@@ -147,7 +157,12 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .manage(AgentProcess::new())
-        .invoke_handler(tauri::generate_handler![restart_agent, agent_status, agent_log_tail])
+        .invoke_handler(tauri::generate_handler![
+            restart_agent,
+            stop_agent_sidecar,
+            agent_status,
+            agent_log_tail
+        ])
         .setup(|app| {
             if let Err(err) = spawn_agent(app.handle()) {
                 eprintln!("Initial agent spawn failed: {err}");
@@ -157,7 +172,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AgentProcess>() {
-                    kill_agent_async(&state);
+                    stop_agent_sidecar_sync(&state);
                 }
             }
         })

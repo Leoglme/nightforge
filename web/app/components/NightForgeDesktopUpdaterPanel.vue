@@ -70,6 +70,7 @@
 import { computed, onMounted, ref, shallowRef } from 'vue'
 import type { DownloadEvent, Update } from '@tauri-apps/plugin-updater'
 import type { NightForgeUpdaterStatus } from '~/types/NightForgeDesktopUpdaterPanel'
+import { invoke } from '@tauri-apps/api/core'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 
@@ -130,7 +131,10 @@ const statusDescription = computed(() => {
     return 'Redémarre NightForge pour charger la nouvelle version. Tes données sont conservées.'
   }
   if (status.value === 'error') {
-    return errorMessage.value || 'Une erreur est survenue pendant la mise à jour.'
+    return (
+      errorMessage.value ||
+      'Une erreur est survenue pendant la mise à jour. Ferme NightForge, vérifie que nightforge-agent.exe n\u2019est plus dans le Gestionnaire des tâches, puis réessaie.'
+    )
   }
   return ''
 })
@@ -165,6 +169,8 @@ async function installUpdate(): Promise<void> {
     status.value = 'downloading'
     errorMessage.value = null
     resetDownloadProgress()
+    // Release nightforge-agent.exe so the NSIS installer can overwrite it.
+    await invoke('stop_agent_sidecar')
     await pendingUpdate.value.downloadAndInstall(onDownloadEvent)
     status.value = 'installed'
   } catch (error) {
