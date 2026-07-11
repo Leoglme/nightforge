@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -53,6 +54,17 @@ _AUTH_MARKERS = (
 )
 
 DEFAULT_CONTINUE_PROMPT = "Vas-y, continue là où tu t'étais arrêté."
+
+
+def claude_subprocess_env() -> dict[str, str]:
+    """
+    Environment for Claude Code subprocesses.
+
+    Strips static OAuth env vars so Claude uses NightForge's rotating apiKeyHelper instead.
+    """
+    env = os.environ.copy()
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    return env
 
 
 def parse_reset_hint(line: str, now: Optional[datetime] = None) -> Optional[datetime]:
@@ -178,6 +190,7 @@ async def run_prompt(
     process = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
+        env=claude_subprocess_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

@@ -9,6 +9,7 @@ Strategies (in order):
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -32,6 +33,7 @@ CLAUDE_USER_AGENT = oauth_credentials.CLAUDE_USER_AGENT
 _CACHE_TTL_SECONDS = 60
 _cache_expires_at = 0.0
 _cache_reading: Optional["QuotaReading"] = None
+_repair_task: Optional[asyncio.Task] = None
 
 
 @dataclass
@@ -195,44 +197,53 @@ async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
     return _parse_five_hour_bucket(payload)
 
 
-async def _read_oauth_usage() -> Optional[QuotaReading]:
+async def _kickoff_repair_if_needed() -> bool:
+    """Start background OAuth repair when credentials are unusable."""
+    global _repair_task
+
     oauth = _load_oauth_block()
-    auth_error = oauth_credentials.oauth_unavailable_reason(oauth)
-    if oauth is None:
-        return QuotaReading(bucket="five_hour", utilization=0.0, resets_at=None, auth_error=auth_error)
+    if oauth_credentials.credentials_usable(oauth):
+        return False
 
-    access_token = oauth.get("accessToken")
-    if not isinstance(access_token, str) or not access_token:
-        return QuotaReading(bucket="five_hour", utilization=0.0, resets_at=None, auth_error=auth_error)
+    if _repair_task is not None and not _repair_task.done():
+        return True
 
-    if _token_expired(oauth):
-        refreshed = await _refresh_oauth_token(oauth)
-        if refreshed is None:
-            return QuotaReading(
-                bucket="five_hour",
-                utilization=0.0,
-                resets_at=None,
-                auth_error=oauth_credentials.oauth_unavailable_reason(oauth),
-            )
-        oauth = refreshed
-        access_token = oauth["accessToken"]
+    async def _run_repair() -> None:
+        await oauth_credentials.repair_oauth_session()
+        invalidate_cache()
 
+    _repair_task = asyncio.create_task(_run_repair())
+    return True
+
+
+async def _read_oauth_usage() -> Optional[QuotaReading]:
+    oauth = await oauth_credentials.ensure_valid_oauth(auto_repair=False)
+    if not oauth_credentials.credentials_usable(oauth):
+        repairing = await _kickoff_repair_if_needed()
+        auth_error = oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing)
+        return QuotaReading(
+            bucket="five_hour",
+            utilization=0.0,
+            resets_at=None,
+            auth_error=auth_error,
+        )
+
+    assert oauth is not None
+    access_token = oauth["accessToken"]
     reading = await _fetch_oauth_usage(access_token)
     if reading is not None:
         return reading
 
-    if not _token_expired(oauth):
-        refreshed = await _refresh_oauth_token(oauth)
-        if refreshed is None:
-            return None
-        return await _fetch_oauth_usage(refreshed["accessToken"])
-
-    return QuotaReading(
-        bucket="five_hour",
-        utilization=0.0,
-        resets_at=None,
-        auth_error="Impossible de lire le quota Claude (API OAuth).",
-    )
+    refreshed = await _refresh_oauth_token(oauth)
+    if refreshed is None:
+        repairing = await _kickoff_repair_if_needed()
+        return QuotaReading(
+            bucket="five_hour",
+            utilization=0.0,
+            resets_at=None,
+            auth_error=oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing),
+        )
+    return await _fetch_oauth_usage(refreshed["accessToken"])
 
 
 def _session_limit_markers(line: str) -> bool:
@@ -325,24 +336,13 @@ def invalidate_cache() -> None:
 
 async def ensure_oauth_fresh() -> bool:
     """
-    Refresh the Claude OAuth access token when it is expired or close to expiry.
+    Ensure Claude OAuth credentials are valid before a CLI run.
 
     Returns:
-        True when credentials exist and a valid access token is available.
+        True when a valid access token is available (may wait for auto-repair).
     """
-    oauth = _load_oauth_block()
-    if oauth is None:
-        return False
-
-    access_token = oauth.get("accessToken")
-    if not isinstance(access_token, str) or not access_token:
-        return False
-
-    if not _token_expired(oauth):
-        return True
-
-    refreshed = await _refresh_oauth_token(oauth)
-    return refreshed is not None
+    oauth = await oauth_credentials.ensure_valid_oauth(auto_repair=True)
+    return oauth_credentials.credentials_usable(oauth)
 
 
 async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional[QuotaReading]:

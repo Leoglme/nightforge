@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from . import claude_runner, git_manager, quota_reader, session_scanner
+from . import claude_runner, git_manager, oauth_setup, quota_reader, session_scanner
 from .claude_runner import DEFAULT_CONTINUE_PROMPT, looks_like_auth_failure
 from .config import AgentConfig, try_load_config
 from .ws_client import WsClient
@@ -60,6 +60,7 @@ class Worker:
             config: Agent configuration.
         """
         self._config = config
+        oauth_setup.ensure_api_key_helper_configured()
         self._client = WsClient(self._fresh_config, self._on_message)
         self._run_state: Optional[_RunState] = None
         self._stop_requested = False
@@ -505,7 +506,11 @@ class Worker:
             )
 
             if auth_failed:
-                await self._emit(run_id, "warning", "Auth Claude expirée — rafraîchissement du token…")
+                await self._emit(
+                    run_id,
+                    "warning",
+                    "Session Claude expirée — reconnexion automatique en cours…",
+                )
                 if await quota_reader.ensure_oauth_fresh():
                     exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
                         run_id,

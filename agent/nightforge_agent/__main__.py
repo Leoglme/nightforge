@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 from nightforge_agent.config import load_config
+from nightforge_agent.oauth_setup import ensure_api_key_helper_configured
 from nightforge_agent.worker import Worker
 
 
@@ -24,6 +25,7 @@ def main() -> None:
         ],
     )
     config = load_config(wait=True)
+    ensure_api_key_helper_configured()
     worker = Worker(config)
     try:
         asyncio.run(worker.start())

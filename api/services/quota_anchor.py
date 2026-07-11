@@ -117,14 +117,23 @@ async def resolve_machine_quota_anchor(
         Tuple of (resets_at, utilization, source, auth_error).
     """
     auth_error: Optional[str] = None
+    machine_online = agent_hub.is_online(machine_id)
     if prefer_live:
         live_reset, live_util, live_error = await _live_machine_quota(
             db, machine_id, user_id, timeout=live_timeout
         )
         if live_error:
             return None, None, "none", live_error
-        elif live_reset is not None or live_util is not None:
+        if live_reset is not None or live_util is not None:
             return live_reset, live_util, "live", None
+        if machine_online:
+            return (
+                None,
+                None,
+                "none",
+                "L'agent n'a pas pu lire le quota Claude. NightForge tente une reconnexion "
+                "automatique via le navigateur.",
+            )
 
     reset_at, utilization = _latest_snapshot(db, machine_id)
     if reset_at is not None or utilization is not None:

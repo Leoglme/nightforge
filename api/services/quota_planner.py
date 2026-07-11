@@ -210,12 +210,12 @@ def build_plan(
         if anchor_utilization is not None and anchor_utilization >= SATURATION_THRESHOLD:
             quota_auth_error = (
                 "Quota Claude saturé mais l'heure de reset est introuvable. "
-                "Lance `claude auth login` sur la machine."
+                "NightForge tente une reconnexion Claude automatique."
             )
         elif anchor_source == "none":
             quota_auth_error = (
                 "Impossible de lire le quota Claude sur cette machine "
-                "(agent hors ligne ou session expirée)."
+                "(agent hors ligne ou reconnexion en cours)."
             )
 
     return QuotaPlanResponse(
