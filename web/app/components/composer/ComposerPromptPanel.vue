@@ -48,20 +48,34 @@
           :key="item.id"
           :class="[
             'group cursor-pointer rounded-lg border px-2.5 py-2 transition-colors',
-            pickedIds.includes(item.id)
-              ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-              : 'border-[var(--app-line)] hover:border-[var(--app-ink-soft)]',
+            item.status === 'DONE'
+              ? 'cursor-default border-[var(--app-line)] bg-[var(--app-surface-2)] opacity-70'
+              : pickedIds.includes(item.id)
+                ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                : 'border-[var(--app-line)] hover:border-[var(--app-ink-soft)]',
           ]"
-          @click="emit('toggle-pick', item.id)"
+          @click="item.status === 'DONE' ? undefined : emit('toggle-pick', item.id)"
         >
           <div class="flex items-start gap-2">
             <UCheckbox
+              v-if="item.status !== 'DONE'"
               :model-value="pickedIds.includes(item.id)"
               class="mt-0.5"
               @click.stop
               @update:model-value="emit('toggle-pick', item.id)"
             />
-            <span class="min-w-0 flex-1 text-xs leading-relaxed">{{ item.prompt }}</span>
+            <UIcon v-else name="i-lucide-check-circle-2" class="mt-0.5 shrink-0 text-[var(--app-green)]" />
+            <div class="min-w-0 flex-1">
+              <StatusBadge v-if="item.status !== 'PENDING'" :status="item.status" class="mb-1" />
+              <span
+                :class="[
+                  'text-xs leading-relaxed',
+                  item.status === 'DONE' ? 'text-[var(--app-ink-soft)] line-through' : '',
+                ]"
+              >
+                {{ item.prompt }}
+              </span>
+            </div>
             <UButton
               size="xs"
               color="error"

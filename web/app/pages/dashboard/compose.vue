@@ -2,7 +2,7 @@
   <div class="flex h-full flex-col">
     <!-- Unified launch toolbar: config lives in the Réglages drawer so the chat fills the page -->
     <div
-      class="flex shrink-0 flex-col gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2 lg:flex-row lg:items-center lg:gap-3 lg:px-6 lg:py-3"
+      class="flex shrink-0 flex-col gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-1.5 lg:flex-row lg:items-center lg:gap-3 lg:px-6 lg:py-3"
     >
       <div class="flex items-center gap-2">
         <UButton
@@ -10,6 +10,7 @@
           variant="outline"
           icon="i-lucide-sliders-horizontal"
           class="shrink-0"
+          size="sm"
           @click="showLaunchSettings = true"
         >
           Réglages
@@ -19,6 +20,7 @@
           color="primary"
           icon="i-lucide-moon-star"
           class="ml-auto shrink-0 lg:order-last lg:ml-0"
+          size="sm"
           :disabled="selectedIds.length === 0 || !machineId || totalMessages === 0"
           :loading="launching"
           @click="launch"
@@ -28,7 +30,7 @@
       </div>
 
       <div
-        class="flex min-w-0 flex-col gap-0.5 text-xs text-[var(--app-ink-soft)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2 lg:min-w-0 lg:flex-1 lg:justify-end"
+        class="hidden min-w-0 flex-col gap-0.5 text-xs text-[var(--app-ink-soft)] sm:flex sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2 lg:min-w-0 lg:flex-1 lg:justify-end"
       >
         <span>{{ launchSummary }}</span>
         <template v-if="selectedMachineName">
@@ -64,10 +66,14 @@
         </div>
 
         <template v-else>
-          <div class="flex items-center justify-between gap-2 border-b border-[var(--app-line)] px-4 py-2">
-            <div class="min-w-0">
-              <div class="truncate text-sm font-medium">{{ activeProject.name }}</div>
-              <div class="truncate text-xs text-[var(--app-ink-soft)]">{{ activeProject.github_repo }}</div>
+          <div
+            class="flex items-center justify-between gap-2 border-b border-[var(--app-line)] px-3 py-1.5 lg:px-4 lg:py-2"
+          >
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-sm leading-tight font-medium">{{ activeProject.name }}</div>
+              <div class="hidden truncate text-xs text-[var(--app-ink-soft)] sm:block">
+                {{ activeProject.github_repo }}
+              </div>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <UButton
@@ -98,7 +104,7 @@
             </div>
           </div>
 
-          <div ref="threadEl" class="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          <div ref="threadEl" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 lg:space-y-4 lg:px-4 lg:py-4">
             <div
               v-if="activeMessages.length === 0"
               class="mx-auto max-w-md rounded-xl border border-dashed border-[var(--app-line)] py-10 text-center text-sm text-[var(--app-ink-soft)]"
@@ -126,8 +132,18 @@
           </div>
 
           <!-- Composer input (sticky bottom) -->
-          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] p-4">
-            <div class="mb-3 grid gap-3 sm:grid-cols-2">
+          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] p-2 lg:p-4">
+            <button
+              type="button"
+              class="mb-2 flex w-full items-center gap-2 rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-surface)] lg:hidden"
+              @click="showMobileMessageSettings = true"
+            >
+              <UIcon name="i-lucide-settings-2" class="shrink-0 text-[var(--app-accent)]" />
+              <span class="min-w-0 flex-1 truncate text-xs text-[var(--app-ink)]">{{ mobileMessageOptionsLabel }}</span>
+              <UIcon name="i-lucide-chevron-right" class="shrink-0 text-[var(--app-ink-soft)]" />
+            </button>
+
+            <div class="mb-3 hidden gap-3 lg:grid lg:grid-cols-2">
               <ComposerSessionPicker
                 v-model="activeSessionId"
                 :machine-id="machineId"
@@ -139,16 +155,16 @@
 
             <UTextarea
               v-model="input"
-              :rows="3"
+              :rows="2"
               autoresize
               :placeholder="
                 activeSessionId
                   ? 'Optionnel — laisse vide pour envoyer « Vas-y, continue » dans la session choisie'
                   : 'Écris le prochain message pour Claude Code…'
               "
-              class="mb-2 w-full"
+              class="mb-1.5 w-full lg:mb-2"
             />
-            <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex flex-wrap items-center justify-between gap-1.5 lg:gap-2">
               <span v-if="pickedIds.length" class="text-xs text-[var(--app-ink-soft)]">
                 {{ pickedIds.length }} prompt(s) dans le brouillon
               </span>
@@ -223,6 +239,30 @@
           }
         "
       />
+    </AppDrawer>
+
+    <!-- Mobile session & model drawer -->
+    <AppDrawer
+      :open="showMobileMessageSettings"
+      title="Session & modèle"
+      :subtitle="activeProject?.name ?? undefined"
+      icon="i-lucide-settings-2"
+      @close="showMobileMessageSettings = false"
+    >
+      <div class="flex flex-col gap-4">
+        <ComposerSessionPicker
+          v-model="activeSessionId"
+          compact
+          :machine-id="machineId"
+          :local-path="activeLocalPath"
+          :offline="!selectedMachineOnline"
+        />
+        <ComposerModelPicker v-model="activeModelId" compact />
+      </div>
+
+      <template #footer>
+        <UButton color="primary" class="flex-1" @click="showMobileMessageSettings = false">Valider</UButton>
+      </template>
     </AppDrawer>
 
     <!-- Mobile launch settings drawer -->
@@ -454,6 +494,7 @@ import { addQueueItem, deleteQueueItem, listQueue } from '~/services/queueServic
 import { createMessage, deleteMessage, listMessages, reorderMessages, updateMessage } from '~/services/messagesService'
 import { planQuota } from '~/services/quotaService'
 import { createRun } from '~/services/runsService'
+import { claudeModelLabel } from '~/constants/claudeModels'
 
 /**
  * Night composer — Claude-like 3-column UI to build per-project message sequences.
@@ -491,6 +532,7 @@ let planTimer: ReturnType<typeof setTimeout> | null = null
 
 const showPicker = ref(false)
 const showMobileLibrary = ref(false)
+const showMobileMessageSettings = ref(false)
 const showCreateProject = ref(false)
 const showSettings = ref(false)
 const showLaunchSettings = ref(false)
@@ -534,7 +576,9 @@ const selectedProjects = computed(() =>
 )
 const activeProject = computed(() => projects.value.find((p) => p.id === activeId.value) ?? null)
 const activeMessages = computed(() => messagesByProject.value[activeId.value] ?? [])
-const activeQueue = computed(() => queueByProject.value[activeId.value] ?? [])
+const activeQueue = computed(() =>
+  (queueByProject.value[activeId.value] ?? []).filter((item) => item.status !== 'DONE'),
+)
 const totalMessages = computed(() =>
   selectedIds.value.reduce((sum, id) => sum + (messagesByProject.value[id]?.length ?? 0), 0),
 )
@@ -545,6 +589,12 @@ const launchSummary = computed(() => {
   const messageLabel = messages <= 1 ? 'message' : 'messages'
   const projectLabel = projects <= 1 ? 'projet' : 'projets'
   return `${messages} ${messageLabel} · ${projects} ${projectLabel}`
+})
+
+const mobileMessageOptionsLabel = computed(() => {
+  const session = activeSessionId.value ? `Session ${activeSessionId.value.slice(0, 8)}…` : 'Nouvelle session'
+  const model = claudeModelLabel(activeModelId.value) ?? 'Modèle défaut'
+  return `${session} · ${model}`
 })
 
 /**

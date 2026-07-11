@@ -1,6 +1,6 @@
 <template>
-  <div class="rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] p-3">
-    <div class="mb-2 flex items-center justify-between gap-2">
+  <div :class="compact ? '' : 'rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] p-3'">
+    <div :class="['flex items-center justify-between gap-2', compact ? 'mb-1.5' : 'mb-2']">
       <span class="app-label flex items-center gap-1.5">
         <UIcon name="i-lucide-history" class="text-[var(--app-accent)]" />
         Session Claude existante
@@ -29,7 +29,7 @@
         @update:model-value="onSelect"
       />
 
-      <p v-if="modelValue" class="mt-2 text-xs text-[var(--app-ink-soft)]">
+      <p v-if="modelValue && !compact" class="mt-2 text-xs text-[var(--app-ink-soft)]">
         Le message sera envoyé dans cette session avec
         <span class="font-medium text-[var(--app-accent-ink)]">« Vas-y, continue »</span>
         si le champ est vide.
@@ -51,6 +51,7 @@ const props = defineProps<{
   localPath?: string | null
   offline?: boolean
   modelValue: string | null
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{

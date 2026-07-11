@@ -86,6 +86,7 @@ def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_i
                     content=draft.content,
                     claude_session_id=draft.claude_session_id,
                     claude_model=draft.claude_model,
+                    source_item_ids=draft.source_item_ids,
                 )
             )
         return
@@ -106,6 +107,7 @@ def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_i
                 project_id=project_id,
                 order_index=index,
                 content=item.prompt,
+                source_item_ids=[item.id],
             )
         )
 

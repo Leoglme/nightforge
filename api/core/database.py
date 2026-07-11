@@ -72,6 +72,7 @@ def _ensure_optional_columns() -> None:
         "run_messages": [
             ("claude_session_id", "VARCHAR(64) NULL"),
             ("claude_model", "VARCHAR(32) NULL"),
+            ("source_item_ids", "JSON NULL"),
         ],
         "project_messages": [
             ("claude_session_id", "VARCHAR(64) NULL"),

@@ -422,14 +422,23 @@ class Worker:
         await self._emit(run_id, "info", f"{name}: on branch {branch}")
 
         did_work = False
-        for message in messages:
+        for index, message in enumerate(messages):
             if self._stop_requested or self._budget_exhausted() or self._quota_budget_exhausted():
                 break
             if self._window_passed():
                 await self._emit(run_id, "info", f"{name}: window reached, stopping")
                 break
+            if index > 0:
+                await self._emit(
+                    run_id,
+                    "info",
+                    f"{name}: message {index + 1}/{len(messages)} — previous message finished",
+                )
             ok = await self._run_message(run_id, cwd, message)
             await git_manager.commit_all(cwd, self._commit_message(message, ok))
+            if not ok:
+                await self._emit(run_id, "warning", f"{name}: stopping sequence after message {index + 1}")
+                break
             did_work = True
 
         if did_work:

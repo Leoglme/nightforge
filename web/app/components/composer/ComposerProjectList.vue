@@ -13,13 +13,13 @@
     </div>
 
     <!-- Pills (horizontal, mobile) / vertical list (desktop) -->
-    <div class="flex items-center gap-1 px-2 py-1.5 lg:block lg:px-1 lg:py-0 lg:pb-2">
+    <div class="flex items-center gap-1 px-2 py-1 lg:px-1 lg:py-0 lg:pb-2">
       <ul class="flex min-w-0 flex-1 gap-1 overflow-x-auto lg:flex-col lg:gap-0.5 lg:overflow-x-visible">
         <li v-for="project in projects" :key="project.id" class="shrink-0 lg:shrink">
           <button
             type="button"
             :class="[
-              'flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-colors',
+              'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors lg:px-3 lg:py-2',
               project.id === activeId
                 ? 'bg-[var(--app-accent-soft)] text-[var(--app-ink)]'
                 : 'text-[var(--app-ink-soft)] hover:bg-[var(--app-surface-2)] hover:text-[var(--app-ink)]',

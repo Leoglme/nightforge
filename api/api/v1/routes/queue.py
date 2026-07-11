@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from enums.queue_item_status import QueueItemStatus
 from models.project import Project
 from models.queue_item import QueueItem
 from models.user import User
@@ -44,6 +45,7 @@ def _assert_owns_project(db: Session, project_id: int, user: User) -> Project:
 @router.get("", response_model=List[QueueItemResponse])
 async def list_queue(
     project_id: int,
+    include_done: bool = False,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Any:
@@ -52,6 +54,7 @@ async def list_queue(
 
     Args:
         project_id: The project id.
+        include_done: When false (default), completed prompts are omitted.
         current_user: The authenticated user.
         db: Database session.
 
@@ -59,12 +62,10 @@ async def list_queue(
         The ordered queue items.
     """
     _assert_owns_project(db, project_id, current_user)
-    return (
-        db.query(QueueItem)
-        .filter(QueueItem.project_id == project_id)
-        .order_by(QueueItem.priority.asc(), QueueItem.created_at.asc())
-        .all()
-    )
+    query = db.query(QueueItem).filter(QueueItem.project_id == project_id)
+    if not include_done:
+        query = query.filter(QueueItem.status != QueueItemStatus.DONE.value)
+    return query.order_by(QueueItem.priority.asc(), QueueItem.created_at.asc()).all()
 
 
 @router.post("", response_model=QueueItemResponse, status_code=status.HTTP_201_CREATED)

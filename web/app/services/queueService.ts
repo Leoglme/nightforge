@@ -9,10 +9,12 @@ import { api } from '~/services/api'
 /**
  * List a project's queue.
  * @param projectId - Project id.
+ * @param includeDone - Include prompts already completed by Claude.
  * @returns The ordered queue items.
  */
-export function listQueue(projectId: number): Promise<QueueItem[]> {
-  return api.get<QueueItem[]>(`/api/v1/projects/${projectId}/queue`)
+export function listQueue(projectId: number, includeDone = false): Promise<QueueItem[]> {
+  const query = includeDone ? '?include_done=true' : ''
+  return api.get<QueueItem[]>(`/api/v1/projects/${projectId}/queue${query}`)
 }
 
 /**

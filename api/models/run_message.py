@@ -8,7 +8,7 @@ one Claude invocation per message, and reports their status back.
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -42,6 +42,7 @@ class RunMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     claude_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     claude_model: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source_item_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), default=QueueItemStatus.PENDING.value, nullable=False
     )

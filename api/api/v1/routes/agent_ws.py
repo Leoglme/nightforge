@@ -37,6 +37,7 @@ from models.run_event import RunEvent
 from models.run_message import RunMessage
 from services.agent_hub import agent_hub
 from services.auth_service import verify_password
+from services.queue_sync import sync_queue_items_for_run_message
 from services.run_dispatcher import dispatch_run
 
 router = APIRouter(prefix="/ws", tags=["websocket"])
@@ -175,8 +176,12 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
         elif msg_type == "message.status":
             run_message = db.get(RunMessage, int(message["message_id"]))
             if run_message:
-                run_message.status = message.get("status", QueueItemStatus.PENDING.value)
+                new_status = message.get("status", QueueItemStatus.PENDING.value)
+                run_message.status = new_status
                 run_message.error = message.get("error")
+                sync_queue_items_for_run_message(
+                    db, run_message, new_status, message.get("error")
+                )
                 db.commit()
         elif msg_type == "message.session":
             run_message = db.get(RunMessage, int(message["message_id"]))

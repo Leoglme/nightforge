@@ -1,6 +1,6 @@
 <template>
-  <div class="rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] p-3">
-    <div class="mb-2 flex items-center gap-1.5">
+  <div :class="compact ? '' : 'rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] p-3'">
+    <div :class="['flex items-center gap-1.5', compact ? 'mb-1.5' : 'mb-2']">
       <UIcon name="i-lucide-cpu" class="text-[var(--app-accent)]" />
       <span class="app-label">Modèle Claude</span>
     </div>
@@ -15,7 +15,7 @@
       @update:model-value="emit('update:modelValue', $event)"
     />
 
-    <p v-if="selectedDescription" class="mt-2 text-xs text-[var(--app-ink-soft)]">
+    <p v-if="selectedDescription && !compact" class="mt-2 text-xs text-[var(--app-ink-soft)]">
       {{ selectedDescription }}
     </p>
   </div>
@@ -30,6 +30,7 @@ import { CLAUDE_MODEL_OPTIONS } from '~/constants/claudeModels'
  */
 const props = defineProps<{
   modelValue: string | null
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{

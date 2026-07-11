@@ -57,15 +57,27 @@
           @keydown.enter.exact.prevent="add"
         />
         <div class="flex items-center justify-between gap-2">
-          <span class="text-xs text-[var(--app-ink-soft)]">{{ items.length }} prompt(s) en file</span>
+          <span class="text-xs text-[var(--app-ink-soft)]">
+            {{ pendingCount }} prompt(s) à faire
+            <template v-if="doneCount"> · {{ doneCount }} terminé(s)</template>
+          </span>
           <UButton color="primary" icon="i-lucide-plus" :disabled="!draft.trim()" :loading="adding" @click="add">
             Ajouter
           </UButton>
         </div>
       </div>
 
+      <!-- Filters -->
+      <div class="flex flex-wrap items-center justify-between gap-2 px-3 sm:px-0">
+        <label class="flex items-center gap-2 text-xs text-[var(--app-ink-soft)]">
+          <USwitch v-model="showDone" size="sm" />
+          Afficher les prompts terminés
+        </label>
+        <span v-if="doneCount" class="text-xs text-[var(--app-ink-soft)]">{{ doneCount }} codé(s) par Claude</span>
+      </div>
+
       <!-- Selection toolbar -->
-      <div v-if="items.length" class="flex items-center justify-between gap-2 px-3 sm:px-0">
+      <div v-if="visibleItems.length" class="flex items-center justify-between gap-2 px-3 sm:px-0">
         <label class="flex items-center gap-2 text-xs text-[var(--app-ink-soft)]">
           <UCheckbox
             :model-value="allSelected"
@@ -92,31 +104,49 @@
         <UIcon name="i-lucide-loader-circle" class="animate-spin text-2xl text-[var(--app-ink-soft)]" />
       </div>
       <div
-        v-else-if="items.length === 0"
+        v-else-if="visibleItems.length === 0"
         class="app-card mx-2 px-6 py-10 text-center text-sm text-[var(--app-ink-soft)] sm:mx-0"
       >
-        File vide. Ajoute ta première idée ci-dessus.
+        <template v-if="showDone && items.length > 0">Aucun prompt en attente. Tous sont terminés.</template>
+        <template v-else>File vide. Ajoute ta première idée ci-dessus.</template>
       </div>
       <ul v-else class="flex flex-col gap-2 px-2 sm:px-0">
         <li
-          v-for="item in items"
+          v-for="item in visibleItems"
           :key="item.id"
           :class="[
             'group flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors',
-            selected.includes(item.id)
-              ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
-              : 'border-[var(--app-line)] bg-[var(--app-surface)] hover:border-[var(--app-ink-soft)]',
+            item.status === 'DONE'
+              ? 'border-[var(--app-line)] bg-[var(--app-surface-2)] opacity-80'
+              : selected.includes(item.id)
+                ? 'border-[var(--app-accent)] bg-[var(--app-accent-soft)]'
+                : 'border-[var(--app-line)] bg-[var(--app-surface)] hover:border-[var(--app-ink-soft)]',
           ]"
-          @click="toggle(item.id)"
+          @click="item.status === 'DONE' ? undefined : toggle(item.id)"
         >
           <UCheckbox
+            v-if="item.status !== 'DONE'"
             :model-value="selected.includes(item.id)"
             class="mt-0.5"
             @click.stop
             @update:model-value="toggle(item.id)"
           />
-          <span class="min-w-0 flex-1 text-sm leading-relaxed whitespace-pre-wrap">{{ item.prompt }}</span>
+          <UIcon v-else name="i-lucide-check-circle-2" class="mt-0.5 shrink-0 text-[var(--app-green)]" />
+          <div class="min-w-0 flex-1">
+            <div class="mb-1 flex flex-wrap items-center gap-2">
+              <StatusBadge :status="item.status" />
+            </div>
+            <span
+              :class="[
+                'text-sm leading-relaxed whitespace-pre-wrap',
+                item.status === 'DONE' ? 'text-[var(--app-ink-soft)] line-through' : '',
+              ]"
+            >
+              {{ item.prompt }}
+            </span>
+          </div>
           <UButton
+            v-if="item.status !== 'DONE'"
             size="xs"
             color="error"
             variant="ghost"
@@ -155,9 +185,15 @@ const draft = ref('')
 const loading = ref(true)
 const adding = ref(false)
 const deleting = ref(false)
+const showDone = ref(false)
 
 const projectOptions = computed(() => projects.value.map((p) => ({ label: p.name, value: p.id })))
-const allSelected = computed(() => items.value.length > 0 && selected.value.length === items.value.length)
+const visibleItems = computed(() =>
+  showDone.value ? items.value : items.value.filter((item) => item.status !== 'DONE'),
+)
+const pendingCount = computed(() => items.value.filter((item) => item.status !== 'DONE').length)
+const doneCount = computed(() => items.value.filter((item) => item.status === 'DONE').length)
+const allSelected = computed(() => visibleItems.value.length > 0 && selected.value.length === visibleItems.value.length)
 const someSelected = computed(() => selected.value.length > 0)
 
 /**
@@ -172,7 +208,7 @@ async function loadQueue(): Promise<void> {
   loading.value = true
   selected.value = []
   try {
-    items.value = await listQueue(projectId.value).catch(() => [])
+    items.value = await listQueue(projectId.value, true).catch(() => [])
   } finally {
     loading.value = false
   }
@@ -211,7 +247,7 @@ function toggle(id: number): void {
  * @returns Nothing.
  */
 function toggleAll(): void {
-  selected.value = allSelected.value ? [] : items.value.map((i) => i.id)
+  selected.value = allSelected.value ? [] : visibleItems.value.map((i) => i.id)
 }
 
 /**
@@ -249,6 +285,10 @@ async function deleteSelected(): Promise<void> {
 }
 
 watch(projectId, loadQueue)
+
+watch(showDone, () => {
+  selected.value = selected.value.filter((id) => visibleItems.value.some((item) => item.id === id))
+})
 
 onMounted(async () => {
   projects.value = await listProjects().catch(() => [])

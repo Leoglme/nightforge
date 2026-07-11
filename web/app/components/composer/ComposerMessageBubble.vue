@@ -1,9 +1,9 @@
 <template>
   <div class="flex justify-end">
     <div
-      class="w-full max-w-[92%] rounded-2xl rounded-br-md border border-[var(--app-line)] bg-[var(--app-accent-soft)] px-4 py-3 shadow-sm"
+      class="w-full max-w-[92%] rounded-2xl rounded-br-md border border-[var(--app-line)] bg-[var(--app-accent-soft)] px-3 py-2 shadow-sm lg:px-4 lg:py-3"
     >
-      <div class="mb-2 flex items-center justify-between gap-2">
+      <div class="mb-1.5 flex items-center justify-between gap-2 lg:mb-2">
         <div class="flex items-center gap-2">
           <span class="app-label">Message {{ index + 1 }}</span>
           <span
