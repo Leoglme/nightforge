@@ -7,6 +7,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -15,6 +16,13 @@ use serde::Serialize;
 use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows: hide console windows spawned for taskkill/tasklist.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Holds the spawned agent child and the last spawn error for diagnostics.
 struct AgentProcess {
@@ -67,6 +75,10 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
         .try_state::<AgentProcess>()
         .ok_or_else(|| "Agent runtime not initialized".to_string())?;
 
+    if state.block_respawn() {
+        return Ok(());
+    }
+
     match app.shell().sidecar("nightforge-agent") {
         Ok(command) => match command
             // Ignore stale machine tokens from the parent OS environment.
@@ -115,32 +127,73 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
     }
 }
 
-/// Stop the sidecar and wait until Windows releases the executable (required before updates).
-fn stop_agent_sidecar_sync(state: &AgentProcess, for_update: bool) {
-    state.set_intentional_stop(true);
-    if for_update {
-        state.set_block_respawn(true);
+/// Whether any nightforge-agent.exe process is still running (Windows only).
+fn agent_processes_running() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let output = Command::new("tasklist")
+            .args(["/FI", "IMAGENAME eq nightforge-agent.exe", "/NH"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+        if let Ok(out) = output {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            return stdout.to_ascii_lowercase().contains("nightforge-agent.exe");
+        }
+        return false;
     }
-    let child = state.child.lock().unwrap().take();
-    if let Some(child) = child {
-        let _ = child.kill();
-        // NSIS cannot overwrite nightforge-agent.exe while the process is still exiting.
-        thread::sleep(Duration::from_millis(1200));
-    }
-    state.set_error(None);
-    if !for_update {
-        state.set_intentional_stop(false);
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
     }
 }
 
-/// Kill every nightforge-agent.exe process (orphans from prior sidecar spawns).
-fn kill_all_agent_processes() {
+/// Force-kill every nightforge-agent.exe process tree (/T).
+fn taskkill_agents_once() {
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/IM", "nightforge-agent.exe"])
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/IM", "nightforge-agent.exe"])
+            .creation_flags(CREATE_NO_WINDOW)
             .output();
-        thread::sleep(Duration::from_millis(1500));
+    }
+}
+
+/// Kill all agent processes and poll until Windows releases nightforge-agent.exe.
+fn kill_all_agent_processes() {
+    for attempt in 0..10 {
+        if attempt > 0 {
+            thread::sleep(Duration::from_millis(500));
+        }
+        taskkill_agents_once();
+        if !agent_processes_running() {
+            break;
+        }
+    }
+    thread::sleep(Duration::from_millis(1000));
+}
+
+/// Stop the sidecar and wait until Windows releases the executable (required before updates).
+fn stop_agent_sidecar_sync(state: &AgentProcess, for_update: bool) {
+    if for_update {
+        state.set_block_respawn(true);
+        state.set_intentional_stop(true);
+    } else {
+        state.set_intentional_stop(true);
+    }
+
+    let child = state.child.lock().unwrap().take();
+    if let Some(child) = child {
+        let _ = child.kill();
+        thread::sleep(Duration::from_millis(800));
+    }
+
+    if for_update {
+        kill_all_agent_processes();
+    }
+
+    state.set_error(None);
+    if !for_update {
+        state.set_intentional_stop(false);
     }
 }
 
@@ -154,12 +207,20 @@ fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Prepare for a desktop update: kill all agent processes and block watchdog respawn.
+/// Prepare for a desktop update: block respawn, kill all agent processes, verify they exited.
 #[tauri::command]
 fn prepare_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
-    kill_all_agent_processes();
     if let Some(state) = app.try_state::<AgentProcess>() {
         stop_agent_sidecar_sync(&state, true);
+    } else {
+        kill_all_agent_processes();
+    }
+
+    if agent_processes_running() {
+        return Err(
+            "nightforge-agent.exe est encore actif. Ferme-le dans le Gestionnaire des taches puis reessaie."
+                .to_string(),
+        );
     }
     Ok(())
 }
@@ -169,6 +230,7 @@ fn prepare_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
 fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
         state.set_block_respawn(false);
+        state.set_intentional_stop(false);
         stop_agent_sidecar_sync(&state, false);
     }
     spawn_agent(&app)
@@ -186,12 +248,12 @@ struct AgentStatus {
 fn agent_status(app: tauri::AppHandle) -> AgentStatus {
     if let Some(state) = app.try_state::<AgentProcess>() {
         AgentStatus {
-            sidecar_running: state.is_running(),
+            sidecar_running: state.is_running() || agent_processes_running(),
             last_error: state.last_error.lock().unwrap().clone(),
         }
     } else {
         AgentStatus {
-            sidecar_running: false,
+            sidecar_running: agent_processes_running(),
             last_error: Some("Agent runtime not initialized".to_string()),
         }
     }

@@ -39,7 +39,7 @@
             </div>
           </div>
 
-          <div v-if="status === 'downloading'" class="space-y-3">
+          <div v-if="status === 'downloading' || status === 'installing'" class="space-y-3">
             <div class="flex items-center justify-between gap-3 text-xs">
               <span class="font-medium text-[var(--app-ink)] tabular-nums">{{ downloadLabel }}</span>
               <span v-if="totalBytes && totalBytes > 0" class="text-[var(--app-ink-soft)] tabular-nums">
@@ -94,6 +94,9 @@ const downloadPercent = computed(() => {
 })
 
 const downloadLabel = computed(() => {
+  if (status.value === 'installing') {
+    return 'Arret de l\u2019agent et installation\u2026'
+  }
   if (status.value !== 'downloading') {
     return ''
   }
@@ -112,6 +115,7 @@ const canDismiss = computed(() => status.value === 'available' || status.value =
 const statusTitle = computed(() => {
   if (status.value === 'available') return 'Mise à jour disponible'
   if (status.value === 'downloading') return 'Téléchargement en cours'
+  if (status.value === 'installing') return 'Installation en cours'
   if (status.value === 'installed') return 'Mise à jour installée'
   if (status.value === 'error') return 'Échec de la mise à jour'
   return 'Mise à jour'
@@ -126,6 +130,9 @@ const statusDescription = computed(() => {
   }
   if (status.value === 'downloading') {
     return 'Ne ferme pas NightForge pendant cette étape.'
+  }
+  if (status.value === 'installing') {
+    return 'NightForge arrete l\u2019agent local puis lance l\u2019installateur. Ne touche a rien.'
   }
   if (status.value === 'installed') {
     return 'Redémarre NightForge pour charger la nouvelle version. Tes données sont conservées.'
@@ -169,9 +176,11 @@ async function installUpdate(): Promise<void> {
     status.value = 'downloading'
     errorMessage.value = null
     resetDownloadProgress()
-    // Release nightforge-agent.exe so the NSIS installer can overwrite it.
+    await pendingUpdate.value.download(onDownloadEvent)
+    status.value = 'installing'
+    // Kill agents immediately before NSIS runs (not at download start — avoids respawn during download).
     await invoke('prepare_desktop_update')
-    await pendingUpdate.value.downloadAndInstall(onDownloadEvent)
+    await pendingUpdate.value.install()
     status.value = 'installed'
   } catch (error) {
     status.value = 'error'
