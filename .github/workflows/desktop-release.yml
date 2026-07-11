@@ -54,6 +54,15 @@ jobs:
         working-directory: web
         run: npm ci
 
+      - name: Verify Tauri bundle assets
+        shell: bash
+        working-directory: web
+        run: |
+          test -f src-tauri/icons/icon.ico || {
+            echo "Missing src-tauri/icons/icon.ico — run: npm run desktop:icons"
+            exit 1
+          }
+
       - name: Set desktop version and updater config
         shell: bash
         working-directory: web

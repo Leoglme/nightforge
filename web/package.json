@@ -10,6 +10,7 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "desktop:generate": "cross-env NUXT_DESKTOP_BUILD=1 nuxt generate",
+    "desktop:icons": "tauri icon app-icon.png -o src-tauri/icons",
     "tauri": "tauri",
     "tauri:dev": "cross-env NUXT_DESKTOP_BUILD=1 tauri dev",
     "tauri:build": "tauri build",
