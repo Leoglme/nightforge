@@ -1,19 +1,17 @@
 """
 Quota planner — turns "N quotas from time T" into a per-window timeline.
 
-Model (simplification, re-anchored on real reset data when available): a "quota" is a
-rolling 5-hour window. Burning quota N fully means the next window opens ~5h after the
-first message of window N, so N sequential quotas span [t0, t0 + N*5h] and a fresh, empty
-quota is available at t0 + N*5h.
+When the machine reports OAuth ``resets_at``, window 1 is anchored on that real bucket:
+- Saturated bucket: work resumes at ``resets_at``, then runs for 5 h.
+- Active bucket: the window ends at ``resets_at``; the start is inferred as
+  ``resets_at - 5 h``, snapped to the current hour when already part-way through.
 
-The API ``resets_at`` is when the current five-hour *bucket* rolls off (e.g. after a 429).
-It anchors the effective start of window 1 only when the bucket is saturated; it is never
-used as the window end. Each burned quota always ends ``starts_at + 5h``.
+Further quotas chain forward in 5 h steps from window 1's end.
 """
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from schemas.quota import QuotaPlanRequest, QuotaPlanResponse, QuotaWindow
 
@@ -56,59 +54,55 @@ def anchor_reset_at_from_snapshot(resets_at: Optional[datetime]) -> Optional[dat
     return resets_at.astimezone(timezone.utc)
 
 
-def first_window_start(
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def window_1_bounds(
     start: datetime,
     anchor_reset_at: Optional[datetime],
     anchor_utilization: Optional[float],
-) -> datetime:
+) -> Tuple[datetime, datetime, bool]:
     """
-    Effective start of quota window 1.
-
-    When the five-hour bucket is saturated (utilization ~100 %), burning only resumes
-    after the real bucket reset — not at the original launch time.
+    Compute window 1 start/end, preferring live OAuth bucket data when available.
 
     Args:
-        start: Planned or actual launch time.
-        anchor_reset_at: Real bucket reset from the machine snapshot, if any.
-        anchor_utilization: Latest five-hour utilization (0.0 -> 1.0), if known.
-
-    Returns:
-        When quota 1 effectively starts for timeline purposes.
-    """
-    utilization = normalize_utilization(anchor_utilization)
-    if (
-        anchor_reset_at is not None
-        and anchor_reset_at > start
-        and utilization is not None
-        and utilization >= SATURATION_THRESHOLD
-    ):
-        return anchor_reset_at
-    return start
-
-
-def window_1_anchored_on_snapshot(
-    start: datetime,
-    anchor_reset_at: Optional[datetime],
-    anchor_utilization: Optional[float],
-) -> bool:
-    """
-    Whether window 1's start was shifted to the machine's real bucket reset.
-
-    Args:
-        start: Planned launch time.
-        anchor_reset_at: Real bucket reset from the machine snapshot, if any.
+        start: Planned or actual launch time (aware UTC).
+        anchor_reset_at: Real ``resets_at`` from the machine snapshot, if any.
         anchor_utilization: Latest five-hour utilization for the machine.
 
     Returns:
-        True when the timeline uses real reset data for window 1.
+        Tuple of (starts_at, resets_at, used_real_oauth_data).
     """
+    start = _aware_utc(start)
     utilization = normalize_utilization(anchor_utilization)
-    return (
-        anchor_reset_at is not None
-        and anchor_reset_at > start
-        and utilization is not None
+    anchor = anchor_reset_at_from_snapshot(anchor_reset_at)
+
+    if anchor is None:
+        return start, start + timedelta(hours=QUOTA_HOURS), False
+
+    # Saturated: the bucket is empty again only after the real reset.
+    if (
+        utilization is not None
         and utilization >= SATURATION_THRESHOLD
-    )
+        and anchor > start
+    ):
+        return anchor, anchor + timedelta(hours=QUOTA_HOURS), True
+
+    # Active bucket: OAuth ``resets_at`` is when the current window ends.
+    if anchor > start:
+        ends_at = anchor
+        begins_at = ends_at - timedelta(hours=QUOTA_HOURS)
+        if begins_at < start < ends_at:
+            hour_floor = start.replace(minute=0, second=0, microsecond=0)
+            if hour_floor >= begins_at:
+                begins_at = hour_floor
+        return begins_at, ends_at, True
+
+    # Stale or past reset — fall back to a rolling estimate from now.
+    return start, start + timedelta(hours=QUOTA_HOURS), False
 
 
 def build_plan(
@@ -129,22 +123,24 @@ def build_plan(
     Returns:
         The planned timeline with per-window start/reset and the fresh-quota time.
     """
-    # Work entirely in timezone-aware UTC so the serialized ISO carries an offset and the
-    # front-end can render reliable local times.
     start = payload.start_at or datetime.now(timezone.utc)
-    if start.tzinfo is None:
-        start = start.replace(tzinfo=timezone.utc)
+    start = _aware_utc(start)
     wake_at = payload.wake_at
-    if wake_at is not None and wake_at.tzinfo is None:
-        wake_at = wake_at.replace(tzinfo=timezone.utc)
+    if wake_at is not None:
+        wake_at = _aware_utc(wake_at)
 
     windows: List[QuotaWindow] = []
-    window_1_real = window_1_anchored_on_snapshot(start, anchor_reset_at, anchor_utilization)
-    cursor = first_window_start(start, anchor_reset_at, anchor_utilization)
+    w1_start, w1_end, w1_real = window_1_bounds(start, anchor_reset_at, anchor_utilization)
+    cursor = w1_start
     for i in range(payload.quota_count):
-        starts_at = cursor
-        resets_at = starts_at + timedelta(hours=QUOTA_HOURS)
-        estimated = not (i == 0 and window_1_real)
+        if i == 0:
+            starts_at = w1_start
+            resets_at = w1_end
+            estimated = not w1_real
+        else:
+            starts_at = cursor
+            resets_at = starts_at + timedelta(hours=QUOTA_HOURS)
+            estimated = True
         windows.append(
             QuotaWindow(index=i + 1, starts_at=starts_at, resets_at=resets_at, estimated=estimated)
         )
@@ -158,7 +154,6 @@ def build_plan(
 
     weekly_warning: Optional[str] = None
     if weekly_budget_left_fraction is not None:
-        # Very rough: each burned 5h quota consumes a slice of the weekly budget.
         if weekly_budget_left_fraction <= 0.15 * payload.quota_count:
             weekly_warning = (
                 "Budget hebdomadaire faible : brûler ces quotas peut atteindre le plafond "

@@ -55,8 +55,8 @@
       <p v-if="firstEstimated" class="mt-2 flex items-start gap-1.5 text-xs text-[var(--app-ink-soft)]">
         <UIcon name="i-lucide-info" class="mt-0.5 shrink-0" />
         <span>
-          Estimation depuis maintenant. Choisis une machine en ligne pour caler le 1<sup>er</sup> créneau sur le vrai
-          reset Claude (ex. 18:00 → 23:00 si le quota est saturé).
+          Estimation depuis maintenant. Choisis une machine en ligne pour caler le créneau sur le bucket Claude réel
+          (heure de fin lue via l'agent).
         </span>
       </p>
 
