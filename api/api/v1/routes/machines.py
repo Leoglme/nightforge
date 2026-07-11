@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from models.machine import Machine
+from models.quota_snapshot import QuotaSnapshot
+from models.run import Run
 from models.user import User
 from schemas.claude_session import ClaudeSessionListResponse, ClaudeSessionResponse
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
@@ -128,6 +130,14 @@ async def delete_machine(
     )
     if not machine:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
+
+    # FK constraints: remove dependent rows before deleting the machine.
+    db.query(QuotaSnapshot).filter(QuotaSnapshot.machine_id == machine_id).delete(
+        synchronize_session=False
+    )
+    for run in db.query(Run).filter(Run.machine_id == machine_id).all():
+        db.delete(run)
+
     db.delete(machine)
     db.commit()
 
