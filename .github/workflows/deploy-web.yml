@@ -39,7 +39,7 @@ jobs:
           echo "NODE_ENV=production" >> .env
 
       - name: 🛠️ Build Nitro (SSR)
-        run: npm run build
+        run: npm run pwa:icons && npm run build
         working-directory: ./web
         env:
           NITRO_PRESET: node-server
@@ -98,7 +98,10 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            cd /var/www/nightforge.dibodev.fr/server
+            WEB_ROOT="/var/www/nightforge.dibodev.fr"
+            # Nitro serves `public/` assets from ../public relative to server/ — symlink html → public.
+            ln -sfn "$WEB_ROOT/html" "$WEB_ROOT/public"
+            cd "$WEB_ROOT/server"
             command -v node || {
               curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
               sudo apt-get install -y nodejs

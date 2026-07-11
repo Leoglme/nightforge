@@ -11,6 +11,7 @@
     "preview": "nuxt preview",
     "desktop:generate": "cross-env NUXT_DESKTOP_BUILD=1 nuxt generate",
     "desktop:icons": "tauri icon app-icon.png -o src-tauri/icons",
+    "pwa:icons": "node scripts/sync-pwa-icons.mjs",
     "tauri": "tauri",
     "tauri:dev": "cross-env NUXT_DESKTOP_BUILD=1 tauri dev",
     "tauri:build": "tauri build",

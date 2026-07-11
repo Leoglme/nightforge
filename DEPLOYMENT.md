@@ -17,6 +17,8 @@ Les workflows déploient déjà vers :
 - API → `/var/www/api.nightforge.dibodev.fr/html`
 - Web → `/var/www/nightforge.dibodev.fr/html` + `/var/www/nightforge.dibodev.fr/server`
 
+Le workflow crée aussi un symlink `html → public` : Nitro résout les assets PWA depuis `../public/` (relatif à `server/`). Sans ce lien, `/apple-touch-icon.png` renvoie une erreur 500 et iOS affiche un « N » générique sur l’écran d’accueil.
+
 ---
 
 ## 2. Ports sur le VPS (écoute locale uniquement)
@@ -72,7 +74,18 @@ server {
         expires 30d;
     }
 
+    # PWA / favicon — servis depuis html/ avant le proxy SSR (iOS Add to Home Screen)
+    location ~ ^/(apple-touch-icon(-precomposed)?\.png|favicon\.ico|site\.webmanifest|android-chrome-.*\.png)$ {
+        try_files $uri =404;
+        access_log off;
+        expires 30d;
+    }
+
     location / {
+        try_files $uri $uri/ @nitro;
+    }
+
+    location @nitro {
         proxy_pass http://127.0.0.1:5620;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
