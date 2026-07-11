@@ -69,7 +69,7 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
                 println!("NightForge agent sidecar started");
                 let app_handle = app.clone();
                 thread::spawn(move || {
-                    while let Ok(event) = rx.blocking_recv() {
+                    while let Some(event) = rx.blocking_recv() {
                         if let CommandEvent::Terminated(payload) = event {
                             eprintln!("Agent sidecar exited: {payload:?}");
                             if let Some(state) = app_handle.try_state::<AgentProcess>() {
