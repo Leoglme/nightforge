@@ -55,8 +55,13 @@ jobs:
           username: ${{ secrets.SSH_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
-            rm -rf /var/www/nightforge.dibodev.fr/server
-            mkdir -p /var/www/nightforge.dibodev.fr/server
+            set -e
+            WEB_ROOT="/var/www/nightforge.dibodev.fr"
+            DEPLOY_USER="${{ secrets.SSH_USERNAME }}"
+            sudo mkdir -p "$WEB_ROOT/html" "$WEB_ROOT/server"
+            sudo rm -rf "$WEB_ROOT/server"
+            sudo mkdir -p "$WEB_ROOT/server"
+            sudo chown -R "$DEPLOY_USER:$DEPLOY_USER" "$WEB_ROOT"
 
       - name: 📤 Deploy web assets
         if: github.event_name != 'pull_request'
