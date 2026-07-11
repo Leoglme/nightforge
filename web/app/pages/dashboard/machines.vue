@@ -42,11 +42,41 @@
       :color="provisionError ? 'error' : 'success'"
       variant="subtle"
       :icon="provisionError ? 'i-lucide-triangle-alert' : 'i-lucide-check-circle-2'"
-      :title="provisionError ? 'Échec de la configuration' : 'Machine connectée'"
+      :title="provisionError ? 'Échec de la configuration' : 'Agent local'"
       :description="provisionMessage"
       :close="true"
       @update:open="provisionMessage = ''"
     />
+
+    <UAlert
+      v-if="isDesktopApp && desktopDiag"
+      color="neutral"
+      variant="subtle"
+      icon="i-lucide-activity"
+      title="Diagnostic de ce PC"
+    >
+      <template #description>
+        <ul class="mt-1 space-y-1 text-sm text-[var(--app-ink-soft)]">
+          <li>
+            Nom détecté : <span class="font-medium text-[var(--app-ink)]">{{ localHostname || '—' }}</span>
+          </li>
+          <li>
+            Agent embarqué :
+            <span class="font-medium" :class="desktopDiag.sidecarRunning ? 'text-green-400' : 'text-amber-400'">
+              {{ desktopDiag.sidecarRunning ? 'processus lancé' : 'processus absent' }}
+            </span>
+          </li>
+          <li v-if="provisionedMachineId">
+            Machine configurée : ID {{ provisionedMachineId }}
+            <span v-if="localMachine">({{ localMachine.name }})</span>
+          </li>
+          <li v-if="desktopDiag.lastError" class="text-amber-300">Dernière erreur : {{ desktopDiag.lastError }}</li>
+          <li class="text-xs">
+            Journal agent : <code class="app-inline-code">%USERPROFILE%\.nightforge\agent.log</code>
+          </li>
+        </ul>
+      </template>
+    </UAlert>
 
     <div v-if="machines.length === 0" class="app-card flex flex-col items-center gap-3 px-6 py-12 text-center">
       <UIcon name="i-lucide-monitor-off" class="text-3xl text-[var(--app-ink-soft)]" />
@@ -70,10 +100,22 @@
     </div>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <UCard v-for="machine in machines" :key="machine.id">
+      <UCard
+        v-for="machine in machines"
+        :key="machine.id"
+        :class="isLocalMachine(machine) ? 'ring-1 ring-[var(--app-accent)]' : ''"
+      >
         <div class="flex items-start justify-between">
           <div class="min-w-0">
-            <div class="truncate font-medium">{{ machine.name }}</div>
+            <div class="flex items-center gap-2">
+              <div class="truncate font-medium">{{ machine.name }}</div>
+              <span
+                v-if="isLocalMachine(machine)"
+                class="shrink-0 rounded bg-[var(--app-accent-soft)] px-1.5 py-0.5 text-[0.65rem] font-medium text-[var(--app-accent-ink)]"
+              >
+                Ce PC
+              </span>
+            </div>
             <div class="text-xs text-[var(--app-ink-soft)]">Agent {{ machine.agent_version ?? '—' }}</div>
           </div>
           <StatusBadge :status="machine.online ? machine.status : 'OFFLINE'" dot />
@@ -163,7 +205,7 @@
 </template>
 
 <script lang="ts" setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Machine } from '~/types'
 import { createMachine, deleteMachine, listMachines } from '~/services/machinesService'
 
@@ -175,7 +217,7 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 const { t } = useI18n()
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
-const { isDesktopApp, provisionThisMachine, restartLocalAgent, detectMachineName, syncLocalAgentIfProvisioned } =
+const { isDesktopApp, provisionThisMachine, restartLocalAgent, detectMachineName, readProvisionFile, getAgentStatus } =
   useMachineProvision()
 
 const machines = ref<Machine[]>([])
@@ -188,7 +230,76 @@ const provisioning = ref(false)
 const restartingAgent = ref(false)
 const provisionMessage = ref('')
 const provisionError = ref(false)
+const localHostname = ref('')
+const provisionedMachineId = ref<number | null>(null)
+const desktopDiag = ref<{ sidecarRunning: boolean; lastError: string | null } | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+
+const localMachine = computed(() => {
+  if (provisionedMachineId.value) {
+    return machines.value.find((m) => m.id === provisionedMachineId.value) ?? null
+  }
+  return machines.value.find((m) => m.name.toLowerCase() === localHostname.value.toLowerCase()) ?? null
+})
+
+/**
+ * Whether a machine row corresponds to this desktop PC.
+ * @param machine - Machine row.
+ * @returns True when this is the local machine.
+ */
+function isLocalMachine(machine: Machine): boolean {
+  if (provisionedMachineId.value && machine.id === provisionedMachineId.value) {
+    return true
+  }
+  return machine.name.toLowerCase() === localHostname.value.toLowerCase()
+}
+
+/**
+ * Load hostname, provision file and sidecar diagnostics.
+ * @returns Nothing.
+ */
+async function loadDesktopState(): Promise<void> {
+  if (!isDesktopApp.value) {
+    return
+  }
+  localHostname.value = await detectMachineName()
+  const provisioned = await readProvisionFile()
+  provisionedMachineId.value = typeof provisioned?.machine_id === 'number' ? provisioned.machine_id : null
+  desktopDiag.value = await getAgentStatus()
+}
+
+/**
+ * Poll until the local machine shows online, or timeout.
+ * @param timeoutMs - Max wait in ms.
+ * @returns True if online before timeout.
+ */
+async function waitForLocalOnline(timeoutMs = 20000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    await refresh()
+    if (localMachine.value?.online) {
+      return true
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000))
+  }
+  return false
+}
+
+/**
+ * Build a helpful offline message after a failed connect attempt.
+ * @returns User-facing hint.
+ */
+function offlineHint(): string {
+  const parts = [
+    'L’agent n’a pas pu se connecter à l’API.',
+    'Vérifie ta connexion internet et que l’antivirus n’a pas bloqué NightForge.',
+    'Consulte %USERPROFILE%\\.nightforge\\agent.log pour le détail.',
+  ]
+  if (desktopDiag.value?.lastError) {
+    parts.unshift(`Erreur sidecar : ${desktopDiag.value.lastError}`)
+  }
+  return parts.join(' ')
+}
 
 /**
  * One-click: register this PC and configure its local agent automatically.
@@ -205,15 +316,22 @@ async function provision(): Promise<void> {
     const hostname = await detectMachineName()
     const existing = machines.value.find((m) => m.name.toLowerCase() === hostname.toLowerCase())
     const machine = await provisionThisMachine()
+    await loadDesktopState()
     provisionError.value = false
-    provisionMessage.value = existing
-      ? `« ${machine.name} » est reconnectée. L'agent redémarre et devrait passer en ligne sous quelques secondes.`
-      : `« ${machine.name} » est enregistrée. L'agent redémarre et devrait passer en ligne sous quelques secondes.`
-    await refresh()
+    const online = await waitForLocalOnline()
+    if (online) {
+      provisionMessage.value = `« ${machine.name} » est en ligne.`
+    } else {
+      provisionError.value = true
+      provisionMessage.value = existing
+        ? `« ${machine.name} » a été reconnectée mais reste hors ligne. ${offlineHint()}`
+        : `« ${machine.name} » est enregistrée mais reste hors ligne. ${offlineHint()}`
+    }
   } catch (error) {
     provisionError.value = true
     provisionMessage.value =
       error instanceof Error ? error.message : 'Impossible de configurer cette machine automatiquement.'
+    await loadDesktopState()
   } finally {
     provisioning.value = false
   }
@@ -232,11 +350,19 @@ async function restartAgent(): Promise<void> {
   provisionError.value = false
   try {
     await restartLocalAgent()
-    provisionMessage.value = 'Agent redémarré — connexion en cours…'
-    await refresh()
+    await loadDesktopState()
+    const online = await waitForLocalOnline()
+    if (online) {
+      provisionError.value = false
+      provisionMessage.value = 'Agent redémarré — machine en ligne.'
+    } else {
+      provisionError.value = true
+      provisionMessage.value = `Agent redémarré mais toujours hors ligne. ${offlineHint()}`
+    }
   } catch (error) {
     provisionError.value = true
     provisionMessage.value = error instanceof Error ? error.message : "Impossible de redémarrer l'agent local."
+    await loadDesktopState()
   } finally {
     restartingAgent.value = false
   }
@@ -318,19 +444,13 @@ async function remove(id: number): Promise<void> {
 
 onMounted(async () => {
   await refresh()
-  if (isDesktopApp.value) {
-    const hostname = await detectMachineName()
-    const localMachine = machines.value.find((m) => m.name.toLowerCase() === hostname.toLowerCase())
-    if (localMachine && !localMachine.online) {
-      const restarted = await syncLocalAgentIfProvisioned()
-      if (restarted) {
-        provisionError.value = false
-        provisionMessage.value =
-          'Agent local redémarré automatiquement. Si le statut reste hors ligne, clique « Redémarrer l\u2019agent » ou « Ajouter cette machine ».'
-      }
+  await loadDesktopState()
+  timer = setInterval(async () => {
+    await refresh()
+    if (isDesktopApp.value) {
+      desktopDiag.value = await getAgentStatus()
     }
-  }
-  timer = setInterval(refresh, 5000)
+  }, 5000)
 })
 
 onBeforeUnmount(() => {

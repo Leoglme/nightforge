@@ -103,7 +103,12 @@ export function useMachineProvision() {
   async function provisionThisMachine(): Promise<MachineCreated> {
     const name = await detectMachineName()
     const machines = await listMachines().catch(() => [])
-    const existing = machines.find((machine) => machine.name.toLowerCase() === name.toLowerCase())
+    const provisioned = await readProvisionFile()
+
+    let existing = machines.find((machine) => machine.name.toLowerCase() === name.toLowerCase())
+    if (!existing && provisioned?.machine_id) {
+      existing = machines.find((machine) => machine.id === provisioned.machine_id)
+    }
 
     const machine = existing ? await reissueMachineToken(existing.id) : await createMachine(name)
 
@@ -128,6 +133,18 @@ export function useMachineProvision() {
     return true
   }
 
+  /**
+   * Query the Tauri sidecar status (desktop only).
+   * @returns Sidecar running flag and last spawn error.
+   */
+  async function getAgentStatus(): Promise<{ sidecarRunning: boolean; lastError: string | null }> {
+    if (!isDesktopApp.value) {
+      return { sidecarRunning: false, lastError: null }
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke('agent_status')
+  }
+
   return {
     isDesktopApp,
     provisionThisMachine,
@@ -136,5 +153,6 @@ export function useMachineProvision() {
     writeProvisionFile,
     readProvisionFile,
     syncLocalAgentIfProvisioned,
+    getAgentStatus,
   }
 }

@@ -5,26 +5,75 @@
 // is a PyInstaller build of `agent/` placed in `src-tauri/binaries/` (see externalBin in
 // tauri.conf.json). In debug/dev builds the sidecar may be absent — spawning is best-effort.
 
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+
+use serde::Serialize;
 use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 
-/// Holds the spawned agent child so it can be killed when the app exits.
-struct AgentProcess(std::sync::Mutex<Option<CommandChild>>);
+/// Holds the spawned agent child and the last spawn error for diagnostics.
+struct AgentProcess {
+    child: Mutex<Option<CommandChild>>,
+    last_error: Mutex<Option<String>>,
+}
 
-/// Spawn the bundled agent sidecar. Best-effort: logs and continues on failure.
-fn spawn_agent(app: &tauri::AppHandle) {
+impl AgentProcess {
+    fn new() -> Self {
+        Self {
+            child: Mutex::new(None),
+            last_error: Mutex::new(None),
+        }
+    }
+
+    fn set_error(&self, message: Option<String>) {
+        *self.last_error.lock().unwrap() = message;
+    }
+
+    fn is_running(&self) -> bool {
+        self.child.lock().unwrap().is_some()
+    }
+}
+
+/// Spawn the bundled agent sidecar.
+fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app
+        .try_state::<AgentProcess>()
+        .ok_or_else(|| "Agent runtime not initialized".to_string())?;
+
     match app.shell().sidecar("nightforge-agent") {
         Ok(command) => match command.spawn() {
             Ok((_rx, child)) => {
-                if let Some(state) = app.try_state::<AgentProcess>() {
-                    *state.0.lock().unwrap() = Some(child);
-                }
+                *state.child.lock().unwrap() = Some(child);
+                state.set_error(None);
                 println!("NightForge agent sidecar started");
+                Ok(())
             }
-            Err(err) => eprintln!("Failed to spawn agent sidecar: {err}"),
+            Err(err) => {
+                let message = format!("Failed to spawn agent sidecar: {err}");
+                state.set_error(Some(message.clone()));
+                eprintln!("{message}");
+                Err(message)
+            }
         },
-        Err(err) => eprintln!("Agent sidecar not available: {err}"),
+        Err(err) => {
+            let message = format!("Agent sidecar not available: {err}");
+            state.set_error(Some(message.clone()));
+            eprintln!("{message}");
+            Err(message)
+        }
+    }
+}
+
+/// Kill the running sidecar without blocking the UI thread (Windows kill can hang).
+fn kill_agent_async(state: &AgentProcess) {
+    let child = state.child.lock().unwrap().take();
+    if let Some(child) = child {
+        thread::spawn(move || {
+            let _ = child.kill();
+        });
     }
 }
 
@@ -32,14 +81,33 @@ fn spawn_agent(app: &tauri::AppHandle) {
 #[tauri::command]
 fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
-        if let Some(child) = state.0.lock().unwrap().take() {
-            child
-                .kill()
-                .map_err(|err| format!("Failed to stop agent sidecar: {err}"))?;
+        kill_agent_async(&state);
+        thread::sleep(Duration::from_millis(400));
+    }
+    spawn_agent(&app)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentStatus {
+    sidecar_running: bool,
+    last_error: Option<String>,
+}
+
+/// Expose local agent sidecar status for the Machines screen.
+#[tauri::command]
+fn agent_status(app: tauri::AppHandle) -> AgentStatus {
+    if let Some(state) = app.try_state::<AgentProcess>() {
+        AgentStatus {
+            sidecar_running: state.is_running(),
+            last_error: state.last_error.lock().unwrap().clone(),
+        }
+    } else {
+        AgentStatus {
+            sidecar_running: false,
+            last_error: Some("Agent runtime not initialized".to_string()),
         }
     }
-    spawn_agent(&app);
-    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -50,18 +118,18 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
-        .manage(AgentProcess(std::sync::Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![restart_agent])
+        .manage(AgentProcess::new())
+        .invoke_handler(tauri::generate_handler![restart_agent, agent_status])
         .setup(|app| {
-            spawn_agent(app.handle());
+            if let Err(err) = spawn_agent(app.handle()) {
+                eprintln!("Initial agent spawn failed: {err}");
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AgentProcess>() {
-                    if let Some(child) = state.0.lock().unwrap().take() {
-                        let _ = child.kill();
-                    }
+                    kill_agent_async(&state);
                 }
             }
         })

@@ -9,26 +9,28 @@ import logging
 from typing import Awaitable, Callable, Optional
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 from .config import AgentConfig
 
 logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[dict], Awaitable[None]]
+ConfigProvider = Callable[[], Optional[AgentConfig]]
 
 
 class WsClient:
     """Manages the persistent agent WebSocket with auto-reconnect."""
 
-    def __init__(self, config: AgentConfig, on_message: MessageHandler) -> None:
+    def __init__(self, config_provider: ConfigProvider, on_message: MessageHandler) -> None:
         """
         Initialize the client.
 
         Args:
-            config: Agent configuration.
+            config_provider: Returns fresh config before each connect (reloads agent.json).
             on_message: Async callback invoked for each server message.
         """
-        self._config = config
+        self._config_provider = config_provider
         self._on_message = on_message
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
         self._connected = asyncio.Event()
@@ -50,8 +52,15 @@ class WsClient:
         """Connect and re-connect forever, dispatching incoming messages."""
         backoff = 1
         while True:
+            config = self._config_provider()
+            if config is None:
+                logger.info("No agent token yet — waiting for provisioning")
+                await asyncio.sleep(5)
+                continue
+
             try:
-                async with websockets.connect(self._config.ws_url) as ws:
+                logger.info("Connecting to control-plane at %s", config.api_base)
+                async with websockets.connect(config.ws_url) as ws:
                     self._ws = ws
                     self._connected.set()
                     backoff = 1
@@ -65,6 +74,12 @@ class WsClient:
                         except json.JSONDecodeError:
                             continue
                         await self._on_message(message)
+            except ConnectionClosed as exc:
+                if exc.code == 4401:
+                    logger.warning("Authentication rejected (4401) — reloading token from agent.json")
+                    backoff = 1
+                else:
+                    logger.warning("WS closed (%s); retrying in %ss", exc, backoff)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("WS disconnected (%s); retrying in %ss", exc, backoff)
             finally:

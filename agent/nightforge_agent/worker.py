@@ -18,7 +18,7 @@ from typing import Dict, Optional
 
 from . import claude_runner, git_manager, quota_reader, session_scanner
 from .claude_runner import DEFAULT_CONTINUE_PROMPT
-from .config import AgentConfig
+from .config import AgentConfig, try_load_config
 from .ws_client import WsClient
 
 logger = logging.getLogger(__name__)
@@ -57,13 +57,25 @@ class Worker:
             config: Agent configuration.
         """
         self._config = config
-        self._client = WsClient(config, self._on_message)
+        self._client = WsClient(self._fresh_config, self._on_message)
         self._run_state: Optional[_RunState] = None
         self._stop_requested = False
         self._failures = 0
         self._last_reset_hint: Optional[datetime] = None
         self._run_task: Optional[asyncio.Task] = None
         self._redispatch_pending = False
+
+    def _fresh_config(self) -> Optional[AgentConfig]:
+        """
+        Reload agent.json before each WebSocket connect.
+
+        Returns:
+            Fresh configuration, or None if not provisioned yet.
+        """
+        config = try_load_config()
+        if config is not None:
+            self._config = config
+        return config
 
     async def start(self) -> None:
         """Start the WebSocket loop and the heartbeat loop concurrently."""
