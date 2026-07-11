@@ -13,13 +13,15 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::Manager;
-use tauri_plugin_shell::process::CommandChild;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
 /// Holds the spawned agent child and the last spawn error for diagnostics.
 struct AgentProcess {
     child: Mutex<Option<CommandChild>>,
     last_error: Mutex<Option<String>>,
+    /// When true, a sidecar exit must not trigger an automatic respawn (updates, manual stop).
+    intentional_stop: Mutex<bool>,
 }
 
 impl AgentProcess {
@@ -27,6 +29,7 @@ impl AgentProcess {
         Self {
             child: Mutex::new(None),
             last_error: Mutex::new(None),
+            intentional_stop: Mutex::new(false),
         }
     }
 
@@ -36,6 +39,14 @@ impl AgentProcess {
 
     fn is_running(&self) -> bool {
         self.child.lock().unwrap().is_some()
+    }
+
+    fn set_intentional_stop(&self, value: bool) {
+        *self.intentional_stop.lock().unwrap() = value;
+    }
+
+    fn intentional_stop(&self) -> bool {
+        *self.intentional_stop.lock().unwrap()
     }
 }
 
@@ -52,10 +63,29 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
             .env("NF_API_BASE", "")
             .spawn()
         {
-            Ok((_rx, child)) => {
+            Ok((mut rx, child)) => {
                 *state.child.lock().unwrap() = Some(child);
                 state.set_error(None);
                 println!("NightForge agent sidecar started");
+                let app_handle = app.clone();
+                thread::spawn(move || {
+                    while let Ok(event) = rx.blocking_recv() {
+                        if let CommandEvent::Terminated(payload) = event {
+                            eprintln!("Agent sidecar exited: {payload:?}");
+                            if let Some(state) = app_handle.try_state::<AgentProcess>() {
+                                state.child.lock().unwrap().take();
+                                if state.intentional_stop() {
+                                    return;
+                                }
+                                thread::sleep(Duration::from_millis(800));
+                                if let Err(err) = spawn_agent(&app_handle) {
+                                    eprintln!("Agent sidecar respawn failed: {err}");
+                                }
+                            }
+                            return;
+                        }
+                    }
+                });
                 Ok(())
             }
             Err(err) => {
@@ -76,6 +106,7 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
 
 /// Stop the sidecar and wait until Windows releases the executable (required before updates).
 fn stop_agent_sidecar_sync(state: &AgentProcess) {
+    state.set_intentional_stop(true);
     let child = state.child.lock().unwrap().take();
     if let Some(child) = child {
         let _ = child.kill();
@@ -83,6 +114,7 @@ fn stop_agent_sidecar_sync(state: &AgentProcess) {
         thread::sleep(Duration::from_millis(1200));
     }
     state.set_error(None);
+    state.set_intentional_stop(false);
 }
 
 /// Stop the bundled agent so installers can replace `nightforge-agent.exe`.

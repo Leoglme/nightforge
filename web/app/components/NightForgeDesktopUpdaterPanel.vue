@@ -181,6 +181,7 @@ async function installUpdate(): Promise<void> {
 
 async function restartApp(): Promise<void> {
   try {
+    window.sessionStorage.setItem('nightforge-force-agent-sync', '1')
     await relaunch()
   } catch (error) {
     console.error('[Updater] relaunch failed:', error)

@@ -228,6 +228,7 @@ const {
   restartLocalAgent,
   detectMachineName,
   readProvisionFile,
+  syncLocalAgentIfProvisioned,
   getAgentStatus,
   getAgentLogTail,
 } = useMachineProvision()
@@ -459,6 +460,11 @@ async function remove(id: number): Promise<void> {
 onMounted(async () => {
   await refresh()
   await loadDesktopState()
+  if (isDesktopApp.value && !localMachine.value?.online) {
+    await syncLocalAgentIfProvisioned()
+    await waitForLocalOnline(15000)
+    await loadDesktopState()
+  }
   timer = setInterval(async () => {
     await refresh()
     if (isDesktopApp.value) {
