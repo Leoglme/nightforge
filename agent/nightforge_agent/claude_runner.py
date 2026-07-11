@@ -37,7 +37,20 @@ _RESET_CLOCK = re.compile(
     r"resets?(?:\s+at)?[^0-9]*([0-9]{1,2})(?::|h)([0-9]{2})\s*([ap]m)?",
     re.IGNORECASE,
 )
+_RESET_SIMPLE_MERIDIEM = re.compile(
+    r"resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
+    re.IGNORECASE,
+)
 _RESET_FR = re.compile(r"réinitialisation\s+à\s+([0-9]{1,2})h([0-9]{2})", re.IGNORECASE)
+
+_AUTH_MARKERS = (
+    "401",
+    "invalid authentication",
+    "authentication credentials",
+    "not authenticated",
+    "please log in",
+    "oauth token",
+)
 
 DEFAULT_CONTINUE_PROMPT = "Vas-y, continue là où tu t'étais arrêté."
 
@@ -78,7 +91,35 @@ def parse_reset_hint(line: str, now: Optional[datetime] = None) -> Optional[date
             candidate += timedelta(days=1)
         return candidate
 
+    simple_match = _RESET_SIMPLE_MERIDIEM.search(line)
+    if simple_match:
+        hour = int(simple_match.group(1))
+        minute = int(simple_match.group(2) or 0)
+        meridiem = (simple_match.group(3) or "").lower()
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        candidate = now.replace(hour=hour % 24, minute=minute, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        return candidate
+
     return None
+
+
+def looks_like_auth_failure(line: str) -> bool:
+    """
+    Detect Claude CLI output that indicates expired or missing OAuth credentials.
+
+    Args:
+        line: A single output line.
+
+    Returns:
+        True when the line suggests an authentication problem.
+    """
+    lowered = line.lower()
+    return any(marker in lowered for marker in _AUTH_MARKERS)
 
 
 @dataclass

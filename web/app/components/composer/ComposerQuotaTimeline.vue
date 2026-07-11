@@ -55,8 +55,8 @@
       <p v-if="firstEstimated" class="mt-2 flex items-start gap-1.5 text-xs text-[var(--app-ink-soft)]">
         <UIcon name="i-lucide-info" class="mt-0.5 shrink-0" />
         <span>
-          Estimation depuis maintenant. Choisis une machine en ligne pour caler le 1<sup>er</sup> reset sur la vraie
-          fenêtre Claude (recalé en direct pendant la nuit).
+          Estimation depuis maintenant. Choisis une machine en ligne pour caler le 1<sup>er</sup> créneau sur le vrai
+          reset Claude (ex. 18:00 → 23:00 si le quota est saturé).
         </span>
       </p>
 
@@ -75,6 +75,7 @@
 <script lang="ts" setup>
 import { computed } from 'vue'
 import type { QuotaPlan } from '~/types'
+import { parseApiDateTime } from '~/utils/datetime'
 
 /**
  * Quota timeline — a readable breakdown of each 5-hour window's reset time and when a fresh
@@ -99,7 +100,7 @@ const freshRelative = computed(() => {
   if (!props.plan) {
     return ''
   }
-  const diffMs = new Date(props.plan.fresh_quota_available_at).getTime() - Date.now()
+  const diffMs = parseApiDateTime(props.plan.fresh_quota_available_at).getTime() - Date.now()
   if (diffMs <= 0) {
     return 'disponible maintenant'
   }

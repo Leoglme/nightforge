@@ -13,15 +13,17 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from . import claude_runner, git_manager, quota_reader, session_scanner
-from .claude_runner import DEFAULT_CONTINUE_PROMPT
+from .claude_runner import DEFAULT_CONTINUE_PROMPT, looks_like_auth_failure
 from .config import AgentConfig, try_load_config
 from .ws_client import WsClient
 
 logger = logging.getLogger(__name__)
+
+SATURATION_THRESHOLD = 0.85
 
 
 @dataclass
@@ -224,6 +226,14 @@ class Worker:
         self._failures = 0
         self._redispatch_pending = False
 
+        wait_until = _parse_dt(run.get("quota_wait_until"))
+        if not await self._ensure_quota_available(run_id, wait_until):
+            await self._set_run_status(run_id, "STOPPED")
+            await self._emit(run_id, "info", f"Run {run_id} stopped before start (quota/window)")
+            self._run_state = None
+            self._run_task = None
+            return
+
         await self._set_run_status(run_id, "RUNNING")
         await self._emit(run_id, "info", f"Run {run_id} started")
 
@@ -316,7 +326,54 @@ class Worker:
         """
         if self._run_state is None or self._run_state.window_end is None:
             return False
-        return datetime.utcnow() >= self._run_state.window_end
+        return _utc_now_naive() >= self._run_state.window_end
+
+    async def _ensure_quota_available(
+        self, run_id: int, planned_wait_until: Optional[datetime]
+    ) -> bool:
+        """
+        Wait until quota is available before the first Claude invocation.
+
+        Uses the planned timeline when provided, otherwise the live OAuth reading.
+
+        Args:
+            run_id: The active run id.
+            planned_wait_until: Optional first-window start from the control-plane plan.
+
+        Returns:
+            False when a stop was requested or the hard window elapsed while waiting.
+        """
+        wait_until: Optional[datetime] = None
+        reading = await quota_reader.read_five_hour(self._last_reset_hint)
+        if (
+            reading is not None
+            and reading.utilization >= SATURATION_THRESHOLD
+            and reading.resets_at is not None
+        ):
+            live_wait = _coerce_wait_until(reading.resets_at)
+            if live_wait is not None and live_wait > _utc_now():
+                wait_until = live_wait
+
+        if wait_until is None and planned_wait_until is not None:
+            planned_wait = _coerce_wait_until(planned_wait_until)
+            if planned_wait is not None and planned_wait > _utc_now():
+                wait_until = planned_wait
+
+        if wait_until is None or wait_until <= _utc_now():
+            await quota_reader.ensure_oauth_fresh()
+            return True
+
+        await self._set_run_status(run_id, "WAITING_QUOTA")
+        await self._client.send({"type": "status", "status": "WAITING_QUOTA"})
+        await self._emit(
+            run_id,
+            "info",
+            f"Quota saturé — attente jusqu'à {_format_local_time(wait_until)}",
+        )
+        resumed = await self._wait_for_quota(wait_until)
+        if resumed:
+            await quota_reader.ensure_oauth_fresh()
+        return resumed
 
     # -------------------------------------------------------------- project
 
@@ -403,13 +460,25 @@ class Worker:
                 return False
 
             await self._set_message_status(message_id, "RUNNING")
-            exit_code, quota_hit, reset_hint, session_id = await self._run_claude(
+            await quota_reader.ensure_oauth_fresh()
+            exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
                 run_id,
                 cwd,
                 prompt,
                 resume_session=resume_session,
                 model=message.get("claude_model") or None,
             )
+
+            if auth_failed:
+                await self._emit(run_id, "warning", "Auth Claude expirée — rafraîchissement du token…")
+                if await quota_reader.ensure_oauth_fresh():
+                    exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
+                        run_id,
+                        cwd,
+                        prompt,
+                        resume_session=resume_session,
+                        model=message.get("claude_model") or None,
+                    )
 
             if session_id and message_id is not None and self._run_state is not None:
                 self._run_state.session_by_message[int(message_id)] = session_id
@@ -458,7 +527,7 @@ class Worker:
         prompt: str,
         resume_session: Optional[str] = None,
         model: Optional[str] = None,
-    ) -> tuple[int, bool, Optional[datetime], Optional[str]]:
+    ) -> tuple[int, bool, Optional[datetime], Optional[str], bool]:
         """
         Stream one Claude invocation, emitting output as events.
 
@@ -470,12 +539,13 @@ class Worker:
             model: Optional Claude model alias.
 
         Returns:
-            Tuple of exit code, quota hit, reset hint and captured session id.
+            Tuple of exit code, quota hit, reset hint, session id and auth-failure flag.
         """
         exit_code = 0
         quota_hit = False
         reset_hint: Optional[datetime] = None
         session_id: Optional[str] = resume_session
+        auth_failed = False
 
         async for line in claude_runner.run_prompt(
             self._config.claude_bin,
@@ -496,9 +566,11 @@ class Worker:
                 if len(parts) > 4 and parts[4]:
                     session_id = parts[4]
                 continue
+            if looks_like_auth_failure(line):
+                auth_failed = True
             await self._emit(run_id, "info", line)
 
-        return exit_code, quota_hit, reset_hint, session_id
+        return exit_code, quota_hit, reset_hint, session_id, auth_failed
 
     async def _wait_for_quota(self, reset_hint: Optional[datetime]) -> bool:
         """
@@ -510,8 +582,9 @@ class Worker:
         Returns:
             True if we should resume, False if a stop was requested or the window elapsed.
         """
-        if reset_hint is not None:
-            total = max(0.0, (reset_hint - datetime.now()).total_seconds()) + 60.0
+        target = _coerce_wait_until(reset_hint)
+        if target is not None:
+            total = max(0.0, (target - _utc_now()).total_seconds()) + 60.0
         else:
             total = float(self._config.quota_retry_seconds)
 
@@ -597,3 +670,38 @@ def _parse_dt(value: Optional[str]) -> Optional[datetime]:
         return parsed.replace(tzinfo=None)
     except ValueError:
         return None
+
+
+def _utc_now() -> datetime:
+    """Current time as timezone-aware UTC."""
+    return datetime.now(timezone.utc)
+
+
+def _utc_now_naive() -> datetime:
+    """Current time as naive UTC (matches control-plane ``window_end`` storage)."""
+    return _utc_now().replace(tzinfo=None)
+
+
+def _coerce_wait_until(value: Optional[datetime]) -> Optional[datetime]:
+    """
+    Normalize a reset/wait timestamp to aware UTC for comparisons.
+
+    Args:
+        value: Datetime from OAuth, CLI hints or the planned timeline.
+
+    Returns:
+        Aware UTC datetime, or None.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _format_local_time(value: datetime) -> str:
+    """Format a UTC instant for human-readable agent logs."""
+    aware = _coerce_wait_until(value)
+    if aware is None:
+        return "?"
+    return aware.astimezone().strftime("%H:%M")

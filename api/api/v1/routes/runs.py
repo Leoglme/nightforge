@@ -27,7 +27,7 @@ from schemas.run import RunAddQuotas, RunCreate, RunEventResponse, RunResponse
 from schemas.run_message import RunMessageCreate, RunMessageResponse, RunMessageRetry, RunProjectSummary
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user
-from services.quota_planner import anchor_reset_at_from_snapshot, build_plan
+from services.quota_planner import anchor_reset_at_from_snapshot, build_plan, normalize_utilization
 from services.run_dispatcher import dispatch_run, push_run_update
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -58,7 +58,7 @@ def _machine_quota_anchor(db: Session, machine_id: int) -> tuple[datetime | None
     reset_at = (
         anchor_reset_at_from_snapshot(snapshot.resets_at) if snapshot.resets_at else None
     )
-    return reset_at, snapshot.utilization
+    return reset_at, normalize_utilization(snapshot.utilization)
 
 
 def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_id: int) -> None:

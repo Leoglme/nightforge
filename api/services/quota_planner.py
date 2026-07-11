@@ -18,6 +18,25 @@ from typing import List, Optional
 from schemas.quota import QuotaPlanRequest, QuotaPlanResponse, QuotaWindow
 
 QUOTA_HOURS = 5
+# Bucket considered full enough to wait for the real ``resets_at`` before window 1.
+SATURATION_THRESHOLD = 0.85
+
+
+def normalize_utilization(value: Optional[float]) -> Optional[float]:
+    """
+    Normalize utilization to a 0.0 -> 1.0 fraction.
+
+    Args:
+        value: Raw utilization from a snapshot or OAuth payload.
+
+    Returns:
+        A fraction in [0, 1], or None when unknown.
+    """
+    if value is None:
+        return None
+    if value > 1.0:
+        return min(value / 100.0, 1.0)
+    return min(max(float(value), 0.0), 1.0)
 
 
 def anchor_reset_at_from_snapshot(resets_at: Optional[datetime]) -> Optional[datetime]:
@@ -56,14 +75,40 @@ def first_window_start(
     Returns:
         When quota 1 effectively starts for timeline purposes.
     """
+    utilization = normalize_utilization(anchor_utilization)
     if (
         anchor_reset_at is not None
         and anchor_reset_at > start
-        and anchor_utilization is not None
-        and anchor_utilization >= 0.99
+        and utilization is not None
+        and utilization >= SATURATION_THRESHOLD
     ):
         return anchor_reset_at
     return start
+
+
+def window_1_anchored_on_snapshot(
+    start: datetime,
+    anchor_reset_at: Optional[datetime],
+    anchor_utilization: Optional[float],
+) -> bool:
+    """
+    Whether window 1's start was shifted to the machine's real bucket reset.
+
+    Args:
+        start: Planned launch time.
+        anchor_reset_at: Real bucket reset from the machine snapshot, if any.
+        anchor_utilization: Latest five-hour utilization for the machine.
+
+    Returns:
+        True when the timeline uses real reset data for window 1.
+    """
+    utilization = normalize_utilization(anchor_utilization)
+    return (
+        anchor_reset_at is not None
+        and anchor_reset_at > start
+        and utilization is not None
+        and utilization >= SATURATION_THRESHOLD
+    )
 
 
 def build_plan(
@@ -94,11 +139,12 @@ def build_plan(
         wake_at = wake_at.replace(tzinfo=timezone.utc)
 
     windows: List[QuotaWindow] = []
+    window_1_real = window_1_anchored_on_snapshot(start, anchor_reset_at, anchor_utilization)
     cursor = first_window_start(start, anchor_reset_at, anchor_utilization)
     for i in range(payload.quota_count):
         starts_at = cursor
         resets_at = starts_at + timedelta(hours=QUOTA_HOURS)
-        estimated = not (i == 0 and anchor_reset_at is not None)
+        estimated = not (i == 0 and window_1_real)
         windows.append(
             QuotaWindow(index=i + 1, starts_at=starts_at, resets_at=resets_at, estimated=estimated)
         )

@@ -95,9 +95,33 @@ def build_run_payload(db: Session, run: Run) -> dict:
             "parallel": run.parallel,
             "quota_count": run.quota_count,
             "window_end": run.window_end.isoformat() if run.window_end else None,
+            "quota_wait_until": _quota_wait_until(run),
             "projects": projects_payload,
         },
     }
+
+
+def _quota_wait_until(run: Run) -> Optional[str]:
+    """
+    First quota window start from the planned timeline, when the run was created.
+
+    The agent waits until this instant before the first Claude prompt when it is still
+  in the future (e.g. bucket saturated, reset at 18:00).
+
+    Args:
+        run: The run whose planned timeline was computed at creation time.
+
+    Returns:
+        ISO timestamp string, or None.
+    """
+    timeline = run.planned_timeline
+    if not isinstance(timeline, dict):
+        return None
+    windows = timeline.get("windows") or []
+    if not windows:
+        return None
+    starts_at = windows[0].get("starts_at")
+    return str(starts_at) if starts_at else None
 
 
 async def dispatch_run(db: Session, run: Run) -> bool:

@@ -281,6 +281,28 @@ def _scan_session_transcripts(max_age_hours: int = 24) -> Optional[QuotaReading]
     return QuotaReading(bucket="five_hour", utilization=1.0, resets_at=best_reset)
 
 
+async def ensure_oauth_fresh() -> bool:
+    """
+    Refresh the Claude OAuth access token when it is expired or close to expiry.
+
+    Returns:
+        True when credentials exist and a valid access token is available.
+    """
+    oauth = _load_oauth_block()
+    if oauth is None:
+        return False
+
+    access_token = oauth.get("accessToken")
+    if not isinstance(access_token, str) or not access_token:
+        return False
+
+    if not _token_expired(oauth):
+        return True
+
+    refreshed = await _refresh_oauth_token(oauth)
+    return refreshed is not None
+
+
 async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional[QuotaReading]:
     """
     Read (or infer) the current five-hour quota bucket.

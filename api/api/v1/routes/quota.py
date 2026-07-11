@@ -13,7 +13,7 @@ from models.quota_snapshot import QuotaSnapshot
 from models.user import User
 from schemas.quota import QuotaPlanRequest, QuotaPlanResponse, QuotaSnapshotResponse
 from services.auth_service import get_current_active_user
-from services.quota_planner import anchor_reset_at_from_snapshot, build_plan
+from services.quota_planner import anchor_reset_at_from_snapshot, build_plan, normalize_utilization
 
 router = APIRouter(prefix="/quota", tags=["quota"])
 
@@ -54,7 +54,7 @@ async def plan_quota(
                 .first()
             )
             if snapshot:
-                anchor_utilization = snapshot.utilization
+                anchor_utilization = normalize_utilization(snapshot.utilization)
                 if snapshot.resets_at:
                     anchor_reset_at = anchor_reset_at_from_snapshot(snapshot.resets_at)
 
