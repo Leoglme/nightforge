@@ -131,8 +131,8 @@ async def resolve_machine_quota_anchor(
                 None,
                 None,
                 "none",
-                "L'agent n'a pas pu lire le quota Claude. NightForge tente une reconnexion "
-                "automatique via le navigateur.",
+                "L'agent n'a pas répondu à temps pour lire le quota Claude. "
+                "Réessaie dans quelques secondes.",
             )
 
     reset_at, utilization = _latest_snapshot(db, machine_id)

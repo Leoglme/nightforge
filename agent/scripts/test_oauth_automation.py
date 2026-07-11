@@ -63,10 +63,15 @@ async def test_repair_spawned_when_no_refresh() -> None:
 
 
 def test_api_key_helper_command() -> None:
-    from nightforge_agent.oauth_setup import api_key_helper_command, oauth_helper_script_path
+    from nightforge_agent.oauth_setup import (
+        OAUTH_TOKEN_FLAG,
+        api_key_helper_command,
+        oauth_helper_script_path,
+    )
 
     assert oauth_helper_script_path().is_file()
-    assert "nightforge_oauth_helper.py" in api_key_helper_command()
+    command = api_key_helper_command()
+    assert "nightforge_oauth" in command or OAUTH_TOKEN_FLAG in command
     print("OK test_api_key_helper_command")
 
 

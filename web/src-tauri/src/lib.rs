@@ -79,6 +79,10 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    if !state.is_running() && agent_processes_running() {
+        kill_all_agent_processes();
+    }
+
     match app.shell().sidecar("nightforge-agent") {
         Ok(command) => match command
             // Ignore stale machine tokens from the parent OS environment.

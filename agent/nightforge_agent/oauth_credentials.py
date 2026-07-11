@@ -35,10 +35,13 @@ REFRESH_EARLY_MS = 30 * 60 * 1000
 REPAIR_WAIT_SECONDS = 300.0
 REPAIR_POLL_SECONDS = 2.0
 REPAIR_COOLDOWN_SECONDS = 120.0
+RATE_LIMIT_BACKOFF_SECONDS = 90.0
 
 _repair_lock = asyncio.Lock()
 _last_repair_attempt = 0.0
 _login_process: Optional[subprocess.Popen[Any]] = None
+_usage_backoff_until = 0.0
+_refresh_backoff_until = 0.0
 
 
 def claude_config_dir() -> Path:
@@ -93,6 +96,18 @@ def token_expires_soon(oauth: dict[str, Any], buffer_ms: int = REFRESH_EARLY_MS)
 
 def credentials_usable(oauth: Optional[dict[str, Any]]) -> bool:
     return bool(oauth and oauth.get("accessToken") and not token_expired(oauth))
+
+
+def is_rate_limited() -> bool:
+    return time.monotonic() < _usage_backoff_until
+
+
+def _mark_rate_limited(seconds: float = RATE_LIMIT_BACKOFF_SECONDS) -> None:
+    global _usage_backoff_until, _refresh_backoff_until
+    until = time.monotonic() + seconds
+    _usage_backoff_until = max(_usage_backoff_until, until)
+    _refresh_backoff_until = max(_refresh_backoff_until, until)
+    logger.warning("Claude OAuth API rate-limited — backing off for %.0fs", seconds)
 
 
 def write_oauth_block(oauth: dict[str, Any]) -> None:
@@ -214,6 +229,9 @@ def load_oauth_block_with_fallback() -> Optional[dict[str, Any]]:
 
 
 async def refresh_oauth_token(oauth: dict[str, Any]) -> Optional[dict[str, Any]]:
+    if time.monotonic() < _refresh_backoff_until:
+        return None
+
     refresh_token = oauth.get("refreshToken")
     if not isinstance(refresh_token, str) or not refresh_token.strip():
         logger.warning("Claude OAuth access token expired and no refresh token is available")
@@ -239,6 +257,9 @@ async def refresh_oauth_token(oauth: dict[str, Any]) -> Optional[dict[str, Any]]
                     logger.debug("OAuth refresh %s (%s) failed: %s", url, label, exc)
                     continue
                 if response.status_code != 200:
+                    if response.status_code == 429:
+                        _mark_rate_limited()
+                        return None
                     logger.debug(
                         "OAuth refresh %s (%s) rejected (%s): %s",
                         url,
@@ -270,20 +291,15 @@ def _spawn_claude_login() -> None:
         return
 
     binary = shutil.which(claude_bin()) or claude_bin()
-    command = [binary, "auth", "login", "--claudeai"]
-    logger.info("Opening browser to restore Claude session (%s)", " ".join(command))
+    logger.info("Opening browser to restore Claude session")
 
     if sys.platform == "win32":
-        _login_process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
-        )
+        # ``start`` runs in the interactive user session so the default browser opens.
+        command = f'start "NightForge Claude" "{binary}" auth login --claudeai'
+        _login_process = subprocess.Popen(command, shell=True)
     else:
         _login_process = subprocess.Popen(
-            command,
+            [binary, "auth", "login", "--claudeai"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

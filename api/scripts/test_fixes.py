@@ -138,7 +138,7 @@ async def test_quota_anchor_online_empty_no_stale_snapshot() -> None:
     assert reset is None
     assert util is None
     assert source == "none"
-    assert err is not None and "reconnexion" in err.lower()
+    assert err is not None and "agent" in err.lower()
     print("OK test_quota_anchor_online_empty_no_stale_snapshot")
 
 

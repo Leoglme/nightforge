@@ -175,6 +175,9 @@ async def _refresh_oauth_token(oauth: dict[str, Any]) -> Optional[dict[str, Any]
 
 
 async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
+    if oauth_credentials.is_rate_limited():
+        return None
+
     headers = {
         "Authorization": f"Bearer {access_token}",
         "anthropic-beta": OAUTH_BETA_HEADER,
@@ -185,6 +188,10 @@ async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
             response = await client.get(OAUTH_USAGE_URL, headers=headers)
     except httpx.HTTPError as exc:
         logger.debug("OAuth usage request failed: %s", exc)
+        return None
+
+    if response.status_code == 429:
+        oauth_credentials._mark_rate_limited()
         return None
 
     if response.status_code != 200:
@@ -234,16 +241,38 @@ async def _read_oauth_usage() -> Optional[QuotaReading]:
     if reading is not None:
         return reading
 
-    refreshed = await _refresh_oauth_token(oauth)
-    if refreshed is None:
-        repairing = await _kickoff_repair_if_needed()
+    if oauth_credentials.is_rate_limited():
+        if _cache_reading is not None and _cache_reading.auth_error is None:
+            return _cache_reading
         return QuotaReading(
             bucket="five_hour",
             utilization=0.0,
             resets_at=None,
-            auth_error=oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing),
+            auth_error=(
+                "Lecture quota temporairement limitée par l'API Claude. "
+                "Nouvelle tentative automatique dans quelques instants."
+            ),
         )
-    return await _fetch_oauth_usage(refreshed["accessToken"])
+
+    if oauth_credentials.token_expired(oauth):
+        refreshed = await _refresh_oauth_token(oauth)
+        if refreshed is None:
+            repairing = await _kickoff_repair_if_needed()
+            return QuotaReading(
+                bucket="five_hour",
+                utilization=0.0,
+                resets_at=None,
+                auth_error=oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing),
+            )
+        return await _fetch_oauth_usage(refreshed["accessToken"])
+
+    repairing = await _kickoff_repair_if_needed()
+    return QuotaReading(
+        bucket="five_hour",
+        utilization=0.0,
+        resets_at=None,
+        auth_error=oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing),
+    )
 
 
 def _session_limit_markers(line: str) -> bool:
