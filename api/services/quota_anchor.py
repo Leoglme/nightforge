@@ -122,7 +122,7 @@ async def resolve_machine_quota_anchor(
             db, machine_id, user_id, timeout=live_timeout
         )
         if live_error:
-            auth_error = live_error
+            return None, None, "none", live_error
         elif live_reset is not None or live_util is not None:
             return live_reset, live_util, "live", None
 
