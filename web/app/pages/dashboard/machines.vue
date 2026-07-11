@@ -123,7 +123,7 @@
             </div>
             <div class="text-xs text-[var(--app-ink-soft)]">Agent {{ machine.agent_version ?? '—' }}</div>
           </div>
-          <StatusBadge :status="machine.online ? machine.status : 'OFFLINE'" dot />
+          <StatusBadge :status="machineDisplayStatus(machine)" dot />
         </div>
         <div class="mt-4 flex justify-end">
           <UButton size="sm" color="error" variant="outline" icon="i-lucide-trash-2" @click="remove(machine.id)" />
@@ -220,6 +220,7 @@ import { createMachine, deleteMachine, listMachines } from '~/services/machinesS
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const { t } = useI18n()
+const toast = useToast()
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
 const {
@@ -266,6 +267,21 @@ function isLocalMachine(machine: Machine): boolean {
     return true
   }
   return machine.name.toLowerCase() === localHostname.value.toLowerCase()
+}
+
+/**
+ * Badge status for a machine row (online idle machines show as ONLINE, not IDLE).
+ * @param machine - Machine row.
+ * @returns Status key for StatusBadge.
+ */
+function machineDisplayStatus(machine: Machine): string {
+  if (!machine.online) {
+    return 'OFFLINE'
+  }
+  if (machine.status === 'IDLE') {
+    return 'ONLINE'
+  }
+  return machine.status
 }
 
 /**
@@ -453,8 +469,20 @@ async function copyToken(): Promise<void> {
  * @returns Nothing.
  */
 async function remove(id: number): Promise<void> {
-  await deleteMachine(id)
-  await refresh()
+  try {
+    await deleteMachine(id)
+    if (provisionedMachineId.value === id) {
+      provisionedMachineId.value = null
+    }
+    toast.add({ title: 'Machine supprimée', color: 'success' })
+    await refresh()
+  } catch (error) {
+    toast.add({
+      title: 'Impossible de supprimer la machine',
+      description: error instanceof Error ? error.message : undefined,
+      color: 'error',
+    })
+  }
 }
 
 onMounted(async () => {

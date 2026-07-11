@@ -22,6 +22,8 @@ struct AgentProcess {
     last_error: Mutex<Option<String>>,
     /// When true, a sidecar exit must not trigger an automatic respawn (updates, manual stop).
     intentional_stop: Mutex<bool>,
+    /// Blocks the watchdog respawn during desktop updates (even if intentional_stop races).
+    block_respawn: Mutex<bool>,
 }
 
 impl AgentProcess {
@@ -30,6 +32,7 @@ impl AgentProcess {
             child: Mutex::new(None),
             last_error: Mutex::new(None),
             intentional_stop: Mutex::new(false),
+            block_respawn: Mutex::new(false),
         }
     }
 
@@ -47,6 +50,14 @@ impl AgentProcess {
 
     fn intentional_stop(&self) -> bool {
         *self.intentional_stop.lock().unwrap()
+    }
+
+    fn set_block_respawn(&self, value: bool) {
+        *self.block_respawn.lock().unwrap() = value;
+    }
+
+    fn block_respawn(&self) -> bool {
+        *self.block_respawn.lock().unwrap()
     }
 }
 
@@ -74,7 +85,7 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
                             eprintln!("Agent sidecar exited: {payload:?}");
                             if let Some(state) = app_handle.try_state::<AgentProcess>() {
                                 state.child.lock().unwrap().take();
-                                if state.intentional_stop() {
+                                if state.intentional_stop() || state.block_respawn() {
                                     return;
                                 }
                                 thread::sleep(Duration::from_millis(800));
@@ -105,8 +116,11 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 /// Stop the sidecar and wait until Windows releases the executable (required before updates).
-fn stop_agent_sidecar_sync(state: &AgentProcess) {
+fn stop_agent_sidecar_sync(state: &AgentProcess, for_update: bool) {
     state.set_intentional_stop(true);
+    if for_update {
+        state.set_block_respawn(true);
+    }
     let child = state.child.lock().unwrap().take();
     if let Some(child) = child {
         let _ = child.kill();
@@ -114,7 +128,20 @@ fn stop_agent_sidecar_sync(state: &AgentProcess) {
         thread::sleep(Duration::from_millis(1200));
     }
     state.set_error(None);
-    state.set_intentional_stop(false);
+    if !for_update {
+        state.set_intentional_stop(false);
+    }
+}
+
+/// Kill every nightforge-agent.exe process (orphans from prior sidecar spawns).
+fn kill_all_agent_processes() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/IM", "nightforge-agent.exe"])
+            .output();
+        thread::sleep(Duration::from_millis(1500));
+    }
 }
 
 /// Stop the bundled agent so installers can replace `nightforge-agent.exe`.
@@ -123,7 +150,17 @@ fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     let state = app
         .try_state::<AgentProcess>()
         .ok_or_else(|| "Agent runtime not initialized".to_string())?;
-    stop_agent_sidecar_sync(&state);
+    stop_agent_sidecar_sync(&state, false);
+    Ok(())
+}
+
+/// Prepare for a desktop update: kill all agent processes and block watchdog respawn.
+#[tauri::command]
+fn prepare_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
+    kill_all_agent_processes();
+    if let Some(state) = app.try_state::<AgentProcess>() {
+        stop_agent_sidecar_sync(&state, true);
+    }
     Ok(())
 }
 
@@ -131,7 +168,8 @@ fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
-        stop_agent_sidecar_sync(&state);
+        state.set_block_respawn(false);
+        stop_agent_sidecar_sync(&state, false);
     }
     spawn_agent(&app)
 }
@@ -192,6 +230,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             restart_agent,
             stop_agent_sidecar,
+            prepare_desktop_update,
             agent_status,
             agent_log_tail
         ])
@@ -204,7 +243,7 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AgentProcess>() {
-                    stop_agent_sidecar_sync(&state);
+                    stop_agent_sidecar_sync(&state, false);
                 }
             }
         })

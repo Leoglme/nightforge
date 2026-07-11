@@ -170,7 +170,7 @@ async function installUpdate(): Promise<void> {
     errorMessage.value = null
     resetDownloadProgress()
     // Release nightforge-agent.exe so the NSIS installer can overwrite it.
-    await invoke('stop_agent_sidecar')
+    await invoke('prepare_desktop_update')
     await pendingUpdate.value.downloadAndInstall(onDownloadEvent)
     status.value = 'installed'
   } catch (error) {

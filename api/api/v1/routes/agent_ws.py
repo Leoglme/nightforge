@@ -187,10 +187,12 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                     db.commit()
         elif msg_type == "sessions.response":
             agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "quota.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
     finally:
         db.close()
 
-    if msg_type != "sessions.response":
+    if msg_type not in ("sessions.response", "quota.response"):
         # Relay to dashboards for live UI (session list responses stay server-side).
         await agent_hub.broadcast_dashboard({"machine_id": machine_id, **message})
 

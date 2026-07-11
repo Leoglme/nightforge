@@ -128,6 +128,27 @@ class Worker:
             await self._handle_sessions_list(message)
         elif msg_type == "run.update":
             await self._handle_run_update(message.get("run", {}))
+        elif msg_type == "quota.read":
+            await self._handle_quota_read(message)
+
+    async def _handle_quota_read(self, message: dict) -> None:
+        """
+        Reply with a fresh OAuth quota reading for the quota planner UI.
+
+        Args:
+            message: Command with optional ``request_id``.
+        """
+        quota_reader.invalidate_cache()
+        reading = await quota_reader.read_five_hour(self._last_reset_hint)
+        await self._client.send(
+            {
+                "type": "quota.response",
+                "request_id": message.get("request_id"),
+                "bucket": reading.bucket if reading else None,
+                "utilization": reading.utilization if reading else None,
+                "resets_at": reading.resets_at.isoformat() if reading and reading.resets_at else None,
+            }
+        )
 
     async def _handle_sessions_list(self, message: dict) -> None:
         """

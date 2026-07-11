@@ -1,12 +1,8 @@
 """
 Quota planner — turns "N quotas from time T" into a per-window timeline.
 
-When the machine reports OAuth ``resets_at``, window 1 is anchored on that real bucket:
-- Saturated bucket: work resumes at ``resets_at``, then runs for 5 h.
-- Active bucket: the window ends at ``resets_at``; the start is inferred as
-  ``resets_at - 5 h``, snapped to the current hour when already part-way through.
-
-Further quotas chain forward in 5 h steps from window 1's end.
+When the machine reports OAuth ``resets_at`` / utilization, window 1 is anchored on that
+real bucket. Further quotas chain forward in 5 h steps from window 1's end.
 """
 from __future__ import annotations
 
@@ -60,6 +56,25 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _snap_bucket_start(start: datetime, begins_at: datetime, ends_at: datetime) -> datetime:
+    """
+  Snap the displayed bucket start to a round hour when already inside the window.
+
+    Args:
+        start: Current time.
+        begins_at: Inferred bucket start (``ends_at - 5h``).
+        ends_at: OAuth bucket end.
+
+    Returns:
+        Adjusted bucket start for display.
+    """
+    if begins_at < start < ends_at:
+        hour_floor = start.replace(minute=0, second=0, microsecond=0)
+        if hour_floor >= begins_at:
+            return hour_floor
+    return begins_at
+
+
 def window_1_bounds(
     start: datetime,
     anchor_reset_at: Optional[datetime],
@@ -80,28 +95,33 @@ def window_1_bounds(
     utilization = normalize_utilization(anchor_utilization)
     anchor = anchor_reset_at_from_snapshot(anchor_reset_at)
 
-    if anchor is None:
+    if anchor is None and utilization is None:
         return start, start + timedelta(hours=QUOTA_HOURS), False
 
     # Saturated: the bucket is empty again only after the real reset.
     if (
-        utilization is not None
+        anchor is not None
+        and utilization is not None
         and utilization >= SATURATION_THRESHOLD
         and anchor > start
     ):
         return anchor, anchor + timedelta(hours=QUOTA_HOURS), True
 
-    # Active bucket: OAuth ``resets_at`` is when the current window ends.
-    if anchor > start:
+    # Active bucket with a future OAuth end time.
+    if anchor is not None and anchor > start:
         ends_at = anchor
-        begins_at = ends_at - timedelta(hours=QUOTA_HOURS)
-        if begins_at < start < ends_at:
-            hour_floor = start.replace(minute=0, second=0, microsecond=0)
-            if hour_floor >= begins_at:
-                begins_at = hour_floor
+        begins_at = _snap_bucket_start(start, ends_at - timedelta(hours=QUOTA_HOURS), ends_at)
         return begins_at, ends_at, True
 
-    # Stale or past reset — fall back to a rolling estimate from now.
+    # Stale ``resets_at`` but fresh utilization — infer remaining window from usage.
+    if utilization is not None and utilization < SATURATION_THRESHOLD:
+        remaining_hours = max(0.25, QUOTA_HOURS * (1.0 - utilization))
+        ends_at = start + timedelta(hours=remaining_hours)
+        begins_at = _snap_bucket_start(
+            start, ends_at - timedelta(hours=QUOTA_HOURS), ends_at
+        )
+        return begins_at, ends_at, True
+
     return start, start + timedelta(hours=QUOTA_HOURS), False
 
 

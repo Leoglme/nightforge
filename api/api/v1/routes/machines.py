@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from models.machine import Machine
+from models.project_machine_path import ProjectMachinePath
 from models.quota_snapshot import QuotaSnapshot
 from models.run import Run
 from models.user import User
@@ -133,6 +134,9 @@ async def delete_machine(
 
     # FK constraints: remove dependent rows before deleting the machine.
     db.query(QuotaSnapshot).filter(QuotaSnapshot.machine_id == machine_id).delete(
+        synchronize_session=False
+    )
+    db.query(ProjectMachinePath).filter(ProjectMachinePath.machine_id == machine_id).delete(
         synchronize_session=False
     )
     for run in db.query(Run).filter(Run.machine_id == machine_id).all():

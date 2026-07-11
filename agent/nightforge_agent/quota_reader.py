@@ -281,6 +281,13 @@ def _scan_session_transcripts(max_age_hours: int = 24) -> Optional[QuotaReading]
     return QuotaReading(bucket="five_hour", utilization=1.0, resets_at=best_reset)
 
 
+def invalidate_cache() -> None:
+    """Drop the cached OAuth reading so the next poll fetches live data."""
+    global _cache_expires_at, _cache_reading
+    _cache_expires_at = 0.0
+    _cache_reading = None
+
+
 async def ensure_oauth_fresh() -> bool:
     """
     Refresh the Claude OAuth access token when it is expired or close to expiry.

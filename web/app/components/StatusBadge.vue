@@ -21,7 +21,7 @@ const props = withDefaults(
 
 const { t } = useI18n()
 
-const SUCCESS = new Set(['COMPLETED', 'DONE', 'IDLE'])
+const SUCCESS = new Set(['COMPLETED', 'DONE', 'IDLE', 'ONLINE'])
 const DANGER = new Set(['FAILED', 'ERROR', 'STOPPED'])
 const PROGRESS = new Set(['RUNNING', 'WORKING'])
 const INFO = new Set(['WAITING_QUOTA', 'SCHEDULED'])

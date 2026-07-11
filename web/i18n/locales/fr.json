@@ -46,7 +46,8 @@
     "SCHEDULED": "Planifié",
     "PENDING": "En attente",
     "SKIPPED": "Ignoré",
-    "OFFLINE": "Hors ligne"
+    "OFFLINE": "Hors ligne",
+    "ONLINE": "En ligne"
   },
   "errors": {
     "loginFailed": "Échec de la connexion",

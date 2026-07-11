@@ -3,4 +3,5 @@ node_modules
 .output
 dist
 src-tauri/target
+src-tauri/gen
 package-lock.json
