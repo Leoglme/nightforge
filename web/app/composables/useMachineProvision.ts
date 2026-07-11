@@ -145,6 +145,19 @@ export function useMachineProvision() {
     return invoke('agent_status')
   }
 
+  /**
+   * Read the last lines of ~/.nightforge/agent.log (desktop only).
+   * @param lines - Number of lines to return.
+   * @returns Log tail text.
+   */
+  async function getAgentLogTail(lines = 15): Promise<string> {
+    if (!isDesktopApp.value) {
+      return ''
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string>('agent_log_tail', { lines })
+  }
+
   return {
     isDesktopApp,
     provisionThisMachine,
@@ -154,5 +167,6 @@ export function useMachineProvision() {
     readProvisionFile,
     syncLocalAgentIfProvisioned,
     getAgentStatus,
+    getAgentLogTail,
   }
 }

@@ -6,10 +6,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import ssl
 from typing import Awaitable, Callable, Optional
 
+import certifi
 import websockets
-from websockets.exceptions import ConnectionClosed
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from .config import AgentConfig
 
@@ -17,6 +19,21 @@ logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[dict], Awaitable[None]]
 ConfigProvider = Callable[[], Optional[AgentConfig]]
+
+
+def _ssl_context_for(url: str) -> ssl.SSLContext | bool | None:
+    """
+    Build an SSL context for WSS connections (required for PyInstaller on Windows).
+
+    Args:
+        url: Target WebSocket URL.
+
+    Returns:
+        SSL settings for ``websockets.connect``.
+    """
+    if not url.startswith("wss://"):
+        return None
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 class WsClient:
@@ -60,7 +77,10 @@ class WsClient:
 
             try:
                 logger.info("Connecting to control-plane at %s", config.api_base)
-                async with websockets.connect(config.ws_url) as ws:
+                async with websockets.connect(
+                    config.ws_url,
+                    ssl=_ssl_context_for(config.ws_url),
+                ) as ws:
                     self._ws = ws
                     self._connected.set()
                     backoff = 1
@@ -80,6 +100,13 @@ class WsClient:
                     backoff = 1
                 else:
                     logger.warning("WS closed (%s); retrying in %ss", exc, backoff)
+            except InvalidStatus as exc:
+                logger.warning(
+                    "WebSocket rejected (HTTP %s) — token invalide ou API inaccessible; "
+                    "vérifie agent.json et supprime NF_AGENT_TOKEN des variables Windows",
+                    exc.response.status_code,
+                )
+                backoff = min(backoff * 2, 30)
             except Exception as exc:  # noqa: BLE001
                 logger.warning("WS disconnected (%s); retrying in %ss", exc, backoff)
             finally:

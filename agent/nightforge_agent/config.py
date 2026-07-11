@@ -78,9 +78,9 @@ def try_load_config() -> Optional[AgentConfig]:
     """
     Build the agent configuration, preferring env vars and falling back to the shared file.
 
-    Resolution order for each value: environment variable → ``.env`` → provisioning file →
-    default. The agent token has no default: if it cannot be found, ``None`` is returned so
-    the caller can wait for provisioning.
+    Resolution order: provisioning file ``~/.nightforge/agent.json`` (desktop app) then
+    environment variables / ``.env``. The file wins when present so a stale ``NF_AGENT_TOKEN``
+    in Windows does not block reconnect after « Ajouter cette machine ».
 
     Returns:
         The parsed configuration, or ``None`` if no agent token is available yet.
@@ -94,15 +94,20 @@ def try_load_config() -> Optional[AgentConfig]:
 
     provisioned = _read_provision_file()
 
-    token = (os.environ.get("NF_AGENT_TOKEN") or provisioned.get("agent_token") or "").strip()
+    # Desktop provisioning file wins over process env (stale NF_AGENT_TOKEN breaks reconnect).
+    provision_token = str(provisioned.get("agent_token") or "").strip()
+    provision_api = str(provisioned.get("api_base") or "").strip()
+
+    token = provision_token or (os.environ.get("NF_AGENT_TOKEN") or "").strip()
     if not token:
         return None
 
-    api_base = (
-        os.environ.get("NF_API_BASE")
-        or provisioned.get("api_base")
-        or "http://localhost:8010"
-    )
+    api_base = provision_api or os.environ.get("NF_API_BASE") or "http://localhost:8010"
+
+    if provision_token:
+        logger.debug("Using agent token from %s", PROVISION_PATH)
+    else:
+        logger.debug("Using agent token from NF_AGENT_TOKEN environment variable")
 
     return AgentConfig(
         api_base=api_base,

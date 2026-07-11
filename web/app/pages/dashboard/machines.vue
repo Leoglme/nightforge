@@ -74,6 +74,11 @@
           <li class="text-xs">
             Journal agent : <code class="app-inline-code">%USERPROFILE%\.nightforge\agent.log</code>
           </li>
+          <li v-if="agentLogTail" class="mt-2">
+            <pre
+              class="max-h-40 overflow-auto rounded border border-[var(--app-line)] bg-[var(--app-surface-2)] p-2 text-[0.65rem] leading-relaxed whitespace-pre-wrap"
+              >{{ agentLogTail }}</pre>
+          </li>
         </ul>
       </template>
     </UAlert>
@@ -217,8 +222,15 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 const { t } = useI18n()
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
-const { isDesktopApp, provisionThisMachine, restartLocalAgent, detectMachineName, readProvisionFile, getAgentStatus } =
-  useMachineProvision()
+const {
+  isDesktopApp,
+  provisionThisMachine,
+  restartLocalAgent,
+  detectMachineName,
+  readProvisionFile,
+  getAgentStatus,
+  getAgentLogTail,
+} = useMachineProvision()
 
 const machines = ref<Machine[]>([])
 const showCreate = ref(false)
@@ -233,6 +245,7 @@ const provisionError = ref(false)
 const localHostname = ref('')
 const provisionedMachineId = ref<number | null>(null)
 const desktopDiag = ref<{ sidecarRunning: boolean; lastError: string | null } | null>(null)
+const agentLogTail = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
 
 const localMachine = computed(() => {
@@ -266,6 +279,7 @@ async function loadDesktopState(): Promise<void> {
   const provisioned = await readProvisionFile()
   provisionedMachineId.value = typeof provisioned?.machine_id === 'number' ? provisioned.machine_id : null
   desktopDiag.value = await getAgentStatus()
+  agentLogTail.value = await getAgentLogTail().catch(() => '')
 }
 
 /**
@@ -292,8 +306,8 @@ async function waitForLocalOnline(timeoutMs = 20000): Promise<boolean> {
 function offlineHint(): string {
   const parts = [
     'L’agent n’a pas pu se connecter à l’API.',
-    'Vérifie ta connexion internet et que l’antivirus n’a pas bloqué NightForge.',
-    'Consulte %USERPROFILE%\\.nightforge\\agent.log pour le détail.',
+    'Si tu as déjà configuré l’agent manuellement, supprime les variables Windows NF_AGENT_TOKEN et NF_API_BASE (Paramètres → Système → Variables d’environnement), puis redémarre NightForge.',
+    'Vérifie aussi que l’antivirus n’a pas bloqué nightforge-agent.exe.',
   ]
   if (desktopDiag.value?.lastError) {
     parts.unshift(`Erreur sidecar : ${desktopDiag.value.lastError}`)

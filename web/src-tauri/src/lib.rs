@@ -5,6 +5,8 @@
 // is a PyInstaller build of `agent/` placed in `src-tauri/binaries/` (see externalBin in
 // tauri.conf.json). In debug/dev builds the sidecar may be absent — spawning is best-effort.
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -44,7 +46,12 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
         .ok_or_else(|| "Agent runtime not initialized".to_string())?;
 
     match app.shell().sidecar("nightforge-agent") {
-        Ok(command) => match command.spawn() {
+        Ok(command) => match command
+            // Ignore stale machine tokens from the parent OS environment.
+            .env("NF_AGENT_TOKEN", "")
+            .env("NF_API_BASE", "")
+            .spawn()
+        {
             Ok((_rx, child)) => {
                 *state.child.lock().unwrap() = Some(child);
                 state.set_error(None);
@@ -110,6 +117,27 @@ fn agent_status(app: tauri::AppHandle) -> AgentStatus {
     }
 }
 
+/// Return the last lines of ~/.nightforge/agent.log for in-app diagnostics.
+#[tauri::command]
+fn agent_log_tail(lines: Option<usize>) -> Result<String, String> {
+    let keep = lines.unwrap_or(15).clamp(5, 80);
+    let path = agent_log_path();
+    if !path.exists() {
+        return Ok("Aucun journal agent pour l'instant.".to_string());
+    }
+
+    let content = fs::read_to_string(&path).map_err(|err| format!("Impossible de lire agent.log: {err}"))?;
+    let tail: Vec<&str> = content.lines().rev().take(keep).collect::<Vec<_>>().into_iter().rev().collect();
+    Ok(tail.join("\n"))
+}
+
+fn agent_log_path() -> PathBuf {
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".nightforge").join("agent.log")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -119,7 +147,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .manage(AgentProcess::new())
-        .invoke_handler(tauri::generate_handler![restart_agent, agent_status])
+        .invoke_handler(tauri::generate_handler![restart_agent, agent_status, agent_log_tail])
         .setup(|app| {
             if let Err(err) = spawn_agent(app.handle()) {
                 eprintln!("Initial agent spawn failed: {err}");
