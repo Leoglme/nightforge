@@ -1,0 +1,129 @@
+name: Desktop build & release (Tauri)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - 'agent/**'
+      - '.github/workflows/desktop-release.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: nightforge-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-desktop:
+    name: Build desktop (windows)
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # Bundle the Python agent as a Tauri sidecar binary (named per target triple).
+      - name: Build agent sidecar (PyInstaller)
+        shell: bash
+        working-directory: agent
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+          pyinstaller --onefile --name nightforge-agent -p . nightforge_agent/__main__.py
+          mkdir -p ../web/src-tauri/binaries
+          cp dist/nightforge-agent.exe ../web/src-tauri/binaries/nightforge-agent-x86_64-pc-windows-msvc.exe
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Set desktop version and updater config
+        shell: bash
+        working-directory: web
+        env:
+          RELEASE_VERSION: 0.1.${{ github.run_number }}
+          UPDATER_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+        run: |
+          if [ -z "$UPDATER_PUBKEY" ]; then
+            echo "Secret TAURI_UPDATER_PUBKEY manquant (clé publique minisign du plugin updater)."
+            exit 1
+          fi
+          python << 'PY'
+          import json, os, re
+          version = os.environ["RELEASE_VERSION"]
+          updater_endpoint = os.environ["UPDATER_ENDPOINT"]
+          updater_pubkey = os.environ["UPDATER_PUBKEY"]
+          os.chdir("src-tauri")
+          with open("Cargo.toml", encoding="utf-8") as f:
+              lines = f.read().splitlines(keepends=True)
+          in_package = False
+          out = []
+          for line in lines:
+              s = line.strip()
+              if s == "[package]":
+                  in_package = True
+              elif s.startswith("[") and s != "[package]":
+                  in_package = False
+              if in_package and re.match(r"^version\s*=\s*", line):
+                  line = f'version = "{version}"\n'
+              out.append(line)
+          with open("Cargo.toml", "w", encoding="utf-8") as f:
+              f.writelines(out)
+          with open("tauri.conf.json", encoding="utf-8") as f:
+              conf = json.load(f)
+          conf["version"] = version
+          conf.setdefault("bundle", {})
+          conf["bundle"]["createUpdaterArtifacts"] = True
+          conf.setdefault("plugins", {})
+          conf["plugins"]["updater"] = {
+              "endpoints": [updater_endpoint],
+              "pubkey": updater_pubkey,
+          }
+          with open("tauri.conf.json", "w", encoding="utf-8") as f:
+              json.dump(conf, f, indent=2, ensure_ascii=False)
+              f.write("\n")
+          print(f"Desktop version set to {version}")
+          PY
+
+      - name: Sync Cargo.lock for new desktop version
+        working-directory: web/src-tauri
+        run: cargo update -p nightforge-desktop
+
+      - name: Build and publish desktop artifacts
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NUXT_PUBLIC_API_BASE: ${{ secrets.NUXT_PUBLIC_API_BASE || 'https://api.nightforge.dibodev.fr' }}
+          NUXT_PUBLIC_GITHUB_REPO: ${{ github.repository }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: web
+          tagName: v0.1.${{ github.run_number }}
+          releaseName: 'NightForge Desktop v0.1.${{ github.run_number }}'
+          releaseBody: |
+            Build Windows (Tauri + Nuxt) avec agent NightForge embarqué (sidecar).
+
+            **Version appli :** `0.1.${{ github.run_number }}`
+
+            Mise à jour in-app : le binaire vérifie `latest.json` sur la dernière release GitHub.
+          releaseDraft: false
+          prerelease: false

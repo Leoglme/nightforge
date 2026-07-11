@@ -1,0 +1,166 @@
+@import 'tailwindcss';
+@import '@nuxt/ui';
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-[var(--app-bg)] text-[var(--app-ink)];
+    font-family: var(--app-font-ui);
+  }
+
+  button:not(:disabled),
+  [role='button']:not([aria-disabled='true']),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+}
+
+/* ============================================================
+   NightForge — "atelier de nuit" theme (light + dark)
+   Charbon neutre en dark (défaut), papier chaud en light.
+   Tokens --app-* pilotent aussi les composants Nuxt UI (--ui-*).
+   ============================================================ */
+:root {
+  --app-font-ui: 'IBM Plex Sans', system-ui, sans-serif;
+  --app-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  --app-bg: #f4f1e9;
+  --app-surface: #fbf9f3;
+  --app-surface-2: #ede9de;
+  --app-ink: #1d1a14;
+  --app-ink-soft: #6e6759;
+  --app-faint: #b7ae9c;
+  --app-line: #e1dbcc;
+  --app-line-soft: #eae5d8;
+  --app-accent: #e8a33c;
+  --app-accent-ink: #9c6b14;
+  --app-accent-soft: rgba(232, 163, 60, 0.14);
+  --app-green: #2f7d4e;
+  --app-green-soft: rgba(47, 125, 78, 0.12);
+  --app-red: #bf4d33;
+  --app-red-soft: rgba(191, 77, 51, 0.12);
+  --app-blue: #4a6b8f;
+  --app-blue-soft: rgba(95, 127, 158, 0.16);
+  --app-violet: #7a63ad;
+  --app-violet-soft: rgba(141, 123, 184, 0.16);
+  --app-overlay: rgba(29, 26, 20, 0.45);
+  --app-btn-bg: #1d1a14;
+  --app-btn-text: #fbf9f3;
+  --app-shadow-soft: 0 10px 30px -18px rgba(29, 26, 20, 0.35);
+}
+
+.app-theme[data-theme='dark'],
+html.dark {
+  --app-bg: #131312;
+  --app-surface: #1b1b1a;
+  --app-surface-2: #242423;
+  --app-ink: #f0efeb;
+  --app-ink-soft: #a1a09a;
+  --app-faint: #565550;
+  --app-line: #2b2b29;
+  --app-line-soft: #232322;
+  --app-accent: #e8a33c;
+  --app-accent-ink: #ecb865;
+  --app-accent-soft: rgba(232, 163, 60, 0.13);
+  --app-green: #55a878;
+  --app-green-soft: rgba(85, 168, 120, 0.15);
+  --app-red: #d76a55;
+  --app-red-soft: rgba(215, 106, 85, 0.15);
+  --app-blue: #85a8c8;
+  --app-blue-soft: rgba(133, 168, 200, 0.15);
+  --app-violet: #a894d6;
+  --app-violet-soft: rgba(168, 148, 214, 0.15);
+  --app-overlay: rgba(0, 0, 0, 0.65);
+  --app-btn-bg: #f0efeb;
+  --app-btn-text: #131312;
+  --app-shadow-soft: 0 10px 30px -18px rgba(0, 0, 0, 0.65);
+}
+
+/* Remap Nuxt UI tokens onto the NightForge palette (both themes). */
+:root,
+html.dark {
+  --ui-bg: var(--app-surface);
+  --ui-bg-muted: var(--app-surface-2);
+  --ui-bg-elevated: var(--app-surface-2);
+  --ui-bg-accented: var(--app-surface-2);
+  --ui-bg-inverted: var(--app-ink);
+  --ui-text-dimmed: var(--app-faint);
+  --ui-text-muted: var(--app-ink-soft);
+  --ui-text-toned: var(--app-ink-soft);
+  --ui-text: var(--app-ink);
+  --ui-text-highlighted: var(--app-ink);
+  --ui-text-inverted: var(--app-bg);
+  --ui-border: var(--app-line);
+  --ui-border-muted: var(--app-line-soft);
+  --ui-border-accented: var(--app-line);
+  --ui-border-inverted: var(--app-ink);
+  --ui-primary: var(--app-ink);
+  --ui-success: var(--app-green);
+  --ui-error: var(--app-red);
+  --ui-warning: var(--app-accent-ink);
+  --ui-info: var(--app-blue);
+}
+
+.app-theme {
+  background-color: var(--app-bg);
+  color: var(--app-ink);
+  font-family: var(--app-font-ui);
+  min-height: 100vh;
+}
+
+@layer components {
+  .app-card {
+    @apply rounded-xl border;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+  }
+
+  .app-label {
+    @apply text-[0.66rem] font-medium tracking-[0.12em] uppercase;
+    font-family: var(--app-font-mono);
+    color: var(--app-ink-soft);
+  }
+
+  .app-page-title {
+    @apply text-lg font-semibold tracking-[-0.01em] sm:text-xl;
+    color: var(--app-ink);
+  }
+
+  .app-badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium;
+    background-color: var(--app-surface-2);
+    color: var(--app-ink-soft);
+  }
+
+  .app-badge--success {
+    background-color: var(--app-green-soft);
+    color: var(--app-green);
+  }
+
+  .app-badge--danger {
+    background-color: var(--app-red-soft);
+    color: var(--app-red);
+  }
+
+  .app-badge--progress {
+    background-color: var(--app-accent-soft);
+    color: var(--app-accent-ink);
+  }
+
+  .app-badge--info {
+    background-color: var(--app-blue-soft);
+    color: var(--app-blue);
+  }
+
+  .app-inline-code {
+    @apply rounded px-1 py-0.5 text-[0.8em];
+    font-family: var(--app-font-mono);
+    background-color: var(--app-surface);
+    border: 1px solid var(--app-line);
+    color: var(--app-ink);
+  }
+}

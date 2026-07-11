@@ -1,0 +1,55 @@
+{
+  "app": {
+    "name": "NightForge",
+    "title": "NightForge — Claude Code autonome la nuit"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "projects": "Projets",
+    "machines": "Machines",
+    "runs": "Nuits",
+    "compose": "Composer",
+    "queue": "File d'attente",
+    "plan": "Planificateur",
+    "docs": "Guide",
+    "logout": "Déconnexion"
+  },
+  "login": {
+    "title": "Connexion",
+    "email": "Email",
+    "password": "Mot de passe",
+    "submit": "Se connecter"
+  },
+  "common": {
+    "stop": "Arrêter",
+    "night": "Nuit",
+    "machine": "Machine",
+    "quotas": "Quotas",
+    "mode": "Mode",
+    "started": "Démarré",
+    "parallel": "Parallèle",
+    "sequential": "Séquentiel",
+    "estimated": "estimé",
+    "real": "réel",
+    "reset": "fin"
+  },
+  "status": {
+    "COMPLETED": "Terminé",
+    "DONE": "Fait",
+    "IDLE": "Inactif",
+    "FAILED": "Échoué",
+    "ERROR": "Erreur",
+    "STOPPED": "Arrêté",
+    "RUNNING": "En cours",
+    "WORKING": "En cours",
+    "WAITING_QUOTA": "Attente quota",
+    "SCHEDULED": "Planifié",
+    "PENDING": "En attente",
+    "SKIPPED": "Ignoré",
+    "OFFLINE": "Hors ligne"
+  },
+  "errors": {
+    "loginFailed": "Échec de la connexion",
+    "userFailed": "Impossible de récupérer l'utilisateur"
+  }
+}

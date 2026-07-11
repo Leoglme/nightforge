@@ -1,0 +1,22 @@
+{
+  "app": {
+    "name": "NightForge"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "machines": "Machines",
+    "runs": "Runs",
+    "compose": "Compose",
+    "queue": "Queue",
+    "plan": "Planner",
+    "docs": "Guide",
+    "logout": "Log out"
+  },
+  "login": {
+    "title": "Sign in",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in"
+  }
+}

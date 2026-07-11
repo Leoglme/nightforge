@@ -1,0 +1,18 @@
+{
+  "name": "nightforge-monorepo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "husky",
+    "postinstall": "npm run install:apps",
+    "install:apps": "npm install --prefix web",
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "cd api && python run_dev.py",
+    "dev:web": "npm run dev --prefix web",
+    "dev:agent": "cd agent && python -m nightforge_agent"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "husky": "^9.1.7"
+  }
+}

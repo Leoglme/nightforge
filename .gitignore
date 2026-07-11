@@ -1,0 +1,29 @@
+# Cloned reference project (kept locally for inspiration, never committed)
+devleadhunter
+
+# Node
+node_modules
+.output
+.nuxt
+.data
+dist
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv
+venv/
+.env
+*.egg-info/
+
+# Tauri / Rust
+web/src-tauri/target
+agent/dist
+agent/build
+*.spec
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea
