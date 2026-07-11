@@ -7,8 +7,8 @@ import asyncio
 import logging
 from pathlib import Path
 
-from .config import load_config
-from .worker import Worker
+from nightforge_agent.config import load_config
+from nightforge_agent.worker import Worker
 
 
 def main() -> None:
