@@ -59,6 +59,15 @@
       </p>
 
       <UAlert
+        v-if="plan.quota_auth_error"
+        class="mt-2"
+        color="error"
+        variant="subtle"
+        icon="i-lucide-key-round"
+        :description="plan.quota_auth_error"
+      />
+
+      <UAlert
         v-if="plan.weekly_warning"
         class="mt-2"
         color="warning"
@@ -114,6 +123,9 @@ const launchLabel = computed(() => {
  * Contextual helper text under the timeline.
  */
 const infoMessage = computed(() => {
+  if (props.plan?.quota_auth_error) {
+    return props.plan.quota_auth_error
+  }
   if (!props.plan || !firstEstimated.value) {
     if (props.plan?.anchor_source === 'live') {
       return 'Créneau calé sur le bucket Claude lu en direct via l’agent.'

@@ -13,22 +13,21 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
+from . import oauth_credentials
 from .claude_runner import parse_reset_hint
 
 logger = logging.getLogger(__name__)
 
 OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
-OAUTH_REFRESH_URL = "https://console.anthropic.com/v1/oauth/token"
-OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 OAUTH_BETA_HEADER = "oauth-2025-04-20"
-CLAUDE_USER_AGENT = "claude-code/2.1.172"
+CLAUDE_USER_AGENT = oauth_credentials.CLAUDE_USER_AGENT
 
 _CACHE_TTL_SECONDS = 60
 _cache_expires_at = 0.0
@@ -49,6 +48,7 @@ class QuotaReading:
     bucket: str
     utilization: float
     resets_at: Optional[datetime]
+    auth_error: Optional[str] = field(default=None)
 
 
 def _claude_config_dir() -> Path:
@@ -142,71 +142,34 @@ def _parse_five_hour_bucket(payload: dict[str, Any]) -> Optional[QuotaReading]:
     )
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _reading_is_actionable(reading: QuotaReading) -> bool:
+    """Ignore transcript hints whose reset time is already in the past."""
+    if reading.resets_at is None:
+        return reading.utilization > 0
+    reset_at = reading.resets_at
+    if reset_at.tzinfo is None:
+        reset_at = reset_at.replace(tzinfo=timezone.utc)
+    return reset_at > _utc_now()
+
+
 def _load_oauth_block() -> Optional[dict[str, Any]]:
-    path = _credentials_path()
-    if not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.debug("Could not read Claude credentials: %s", exc)
-        return None
-    oauth = data.get("claudeAiOauth")
-    return oauth if isinstance(oauth, dict) else None
+    return oauth_credentials.load_oauth_block_with_fallback()
 
 
 def _token_expired(oauth: dict[str, Any], buffer_seconds: int = 60) -> bool:
-    expires_at = oauth.get("expiresAt")
-    if not isinstance(expires_at, (int, float)):
-        return True
-    return int(expires_at) <= int(time.time() * 1000) + buffer_seconds * 1000
+    return oauth_credentials.token_expired(oauth, buffer_seconds)
 
 
 def _write_oauth_block(oauth: dict[str, Any]) -> None:
-    path = _credentials_path()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        payload = {}
-    payload["claudeAiOauth"] = oauth
-    tmp = path.with_suffix(".credentials.json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    oauth_credentials.write_oauth_block(oauth)
 
 
 async def _refresh_oauth_token(oauth: dict[str, Any]) -> Optional[dict[str, Any]]:
-    refresh_token = oauth.get("refreshToken")
-    if not isinstance(refresh_token, str) or not refresh_token:
-        return None
-
-    body = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": OAUTH_CLIENT_ID,
-    }
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.post(OAUTH_REFRESH_URL, json=body)
-    except httpx.HTTPError as exc:
-        logger.debug("OAuth refresh failed: %s", exc)
-        return None
-
-    if response.status_code != 200:
-        logger.debug("OAuth refresh rejected (%s): %s", response.status_code, response.text[:200])
-        return None
-
-    data = response.json()
-    updated = {
-        **oauth,
-        "accessToken": data["access_token"],
-        "refreshToken": data.get("refresh_token", refresh_token),
-        "expiresAt": int(time.time() * 1000) + int(data.get("expires_in", 3600)) * 1000,
-    }
-    try:
-        _write_oauth_block(updated)
-    except OSError as exc:
-        logger.warning("Could not persist refreshed OAuth token: %s", exc)
-    return updated
+    return await oauth_credentials.refresh_oauth_token(oauth)
 
 
 async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
@@ -234,17 +197,23 @@ async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
 
 async def _read_oauth_usage() -> Optional[QuotaReading]:
     oauth = _load_oauth_block()
+    auth_error = oauth_credentials.oauth_unavailable_reason(oauth)
     if oauth is None:
-        return None
+        return QuotaReading(bucket="five_hour", utilization=0.0, resets_at=None, auth_error=auth_error)
 
     access_token = oauth.get("accessToken")
     if not isinstance(access_token, str) or not access_token:
-        return None
+        return QuotaReading(bucket="five_hour", utilization=0.0, resets_at=None, auth_error=auth_error)
 
     if _token_expired(oauth):
         refreshed = await _refresh_oauth_token(oauth)
         if refreshed is None:
-            return None
+            return QuotaReading(
+                bucket="five_hour",
+                utilization=0.0,
+                resets_at=None,
+                auth_error=oauth_credentials.oauth_unavailable_reason(oauth),
+            )
         oauth = refreshed
         access_token = oauth["accessToken"]
 
@@ -258,7 +227,12 @@ async def _read_oauth_usage() -> Optional[QuotaReading]:
             return None
         return await _fetch_oauth_usage(refreshed["accessToken"])
 
-    return None
+    return QuotaReading(
+        bucket="five_hour",
+        utilization=0.0,
+        resets_at=None,
+        auth_error="Impossible de lire le quota Claude (API OAuth).",
+    )
 
 
 def _session_limit_markers(line: str) -> bool:
@@ -336,7 +310,10 @@ def _scan_session_transcripts(max_age_hours: int = 24) -> Optional[QuotaReading]
     if best_reset is None:
         return None
 
-    return QuotaReading(bucket="five_hour", utilization=1.0, resets_at=best_reset)
+    reading = QuotaReading(bucket="five_hour", utilization=1.0, resets_at=best_reset)
+    if not _reading_is_actionable(reading):
+        return None
+    return reading
 
 
 def invalidate_cache() -> None:
@@ -385,10 +362,19 @@ async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional
         return _cache_reading
 
     reading = await _read_oauth_usage()
-    if reading is None:
-        reading = _scan_session_transcripts()
+    if reading is not None and reading.auth_error and reading.resets_at is None:
+        _cache_reading = reading
+        _cache_expires_at = now + 15
+        return reading
+
+    if reading is None or (reading.resets_at is None and reading.utilization <= 0):
+        transcript = _scan_session_transcripts()
+        if transcript is not None:
+            reading = transcript
     if reading is None and last_reset_hint is not None:
-        reading = QuotaReading(bucket="five_hour", utilization=1.0, resets_at=last_reset_hint)
+        hint_reading = QuotaReading(bucket="five_hour", utilization=1.0, resets_at=last_reset_hint)
+        if _reading_is_actionable(hint_reading):
+            reading = hint_reading
 
     if reading is not None:
         # Normalize the reset to timezone-aware UTC. The OAuth path is already aware; the
@@ -399,7 +385,12 @@ async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional
                 bucket=reading.bucket,
                 utilization=reading.utilization,
                 resets_at=reading.resets_at.astimezone(timezone.utc),
+                auth_error=reading.auth_error,
             )
+        if not _reading_is_actionable(reading) and reading.auth_error is None:
+            reading = None
+
+    if reading is not None:
         _cache_reading = reading
         _cache_expires_at = now + _CACHE_TTL_SECONDS
 

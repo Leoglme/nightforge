@@ -99,7 +99,11 @@ class Worker:
         await self._client.send({"type": "status", "status": status})
 
         reading = await quota_reader.read_five_hour(self._last_reset_hint)
-        if reading is not None:
+        if (
+            reading is not None
+            and reading.auth_error is None
+            and (reading.resets_at is not None or reading.utilization > 0)
+        ):
             await self._client.send(
                 {
                     "type": "quota",
@@ -148,6 +152,7 @@ class Worker:
                 "bucket": reading.bucket if reading else None,
                 "utilization": reading.utilization if reading else None,
                 "resets_at": reading.resets_at.isoformat() if reading and reading.resets_at else None,
+                "auth_error": reading.auth_error if reading else None,
             }
         )
 

@@ -59,6 +59,10 @@ class QuotaPlanResponse(BaseModel):
     weekly_warning: Optional[str] = Field(
         default=None, description="Warning if a weekly cap may bite before all windows complete"
     )
+    quota_auth_error: Optional[str] = Field(
+        default=None,
+        description="When set, Claude OAuth could not be read on the machine (re-login required)",
+    )
 
 
 class QuotaSnapshotResponse(BaseModel):

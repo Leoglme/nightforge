@@ -9,14 +9,12 @@ from sqlalchemy.orm import Session
 
 from core.database import get_db
 from models.machine import Machine
-from models.project_machine_path import ProjectMachinePath
-from models.quota_snapshot import QuotaSnapshot
-from models.run import Run
 from models.user import User
 from schemas.claude_session import ClaudeSessionListResponse, ClaudeSessionResponse
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user, get_password_hash
+from services.machine_cleanup import delete_machine_cascade
 
 router = APIRouter(prefix="/machines", tags=["machines"])
 
@@ -132,17 +130,7 @@ async def delete_machine(
     if not machine:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
 
-    # FK constraints: remove dependent rows before deleting the machine.
-    db.query(QuotaSnapshot).filter(QuotaSnapshot.machine_id == machine_id).delete(
-        synchronize_session=False
-    )
-    db.query(ProjectMachinePath).filter(ProjectMachinePath.machine_id == machine_id).delete(
-        synchronize_session=False
-    )
-    for run in db.query(Run).filter(Run.machine_id == machine_id).all():
-        db.delete(run)
-
-    db.delete(machine)
+    delete_machine_cascade(db, machine)
     db.commit()
 
 

@@ -35,7 +35,7 @@ router = APIRouter(prefix="/runs", tags=["runs"])
 async def _machine_quota_anchor(
     db: Session, machine_id: int, user_id: int
 ) -> tuple[datetime | None, float | None]:
-    reset_at, utilization, _source = await resolve_machine_quota_anchor(
+    reset_at, utilization, _source, _auth_error = await resolve_machine_quota_anchor(
         db, machine_id, user_id
     )
     return reset_at, utilization

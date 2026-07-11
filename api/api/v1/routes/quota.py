@@ -39,9 +39,10 @@ async def plan_quota(
     anchor_reset_at = None
     anchor_utilization = None
     anchor_source = None
+    quota_auth_error = None
     if payload.machine_id is not None:
-        anchor_reset_at, anchor_utilization, anchor_source = await resolve_machine_quota_anchor(
-            db, payload.machine_id, current_user.id
+        anchor_reset_at, anchor_utilization, anchor_source, quota_auth_error = (
+            await resolve_machine_quota_anchor(db, payload.machine_id, current_user.id)
         )
 
     return build_plan(
@@ -49,6 +50,7 @@ async def plan_quota(
         anchor_reset_at=anchor_reset_at,
         anchor_utilization=anchor_utilization,
         anchor_source=anchor_source,
+        quota_auth_error=quota_auth_error,
     )
 
 

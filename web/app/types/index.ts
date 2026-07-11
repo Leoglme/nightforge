@@ -80,8 +80,8 @@ export interface QuotaPlan {
   anchor_source?: 'live' | 'snapshot' | 'none' | null
   hours_after_wake?: number | null
   weekly_warning?: string | null
+  quota_auth_error?: string | null
 }
-
 export interface Run {
   id: number
   machine_id: number

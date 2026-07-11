@@ -148,6 +148,7 @@ def build_plan(
     anchor_utilization: Optional[float] = None,
     weekly_budget_left_fraction: Optional[float] = None,
     anchor_source: Optional[str] = None,
+    quota_auth_error: Optional[str] = None,
 ) -> QuotaPlanResponse:
     """
     Build the quota timeline for the requested number of quotas.
@@ -205,6 +206,18 @@ def build_plan(
                 "hebdo (surtout Opus) avant la fin des fenêtres."
             )
 
+    if quota_auth_error is None and not w1_real and payload.machine_id is not None:
+        if anchor_utilization is not None and anchor_utilization >= SATURATION_THRESHOLD:
+            quota_auth_error = (
+                "Quota Claude saturé mais l'heure de reset est introuvable. "
+                "Lance `claude auth login` sur la machine."
+            )
+        elif anchor_source == "none":
+            quota_auth_error = (
+                "Impossible de lire le quota Claude sur cette machine "
+                "(agent hors ligne ou session expirée)."
+            )
+
     return QuotaPlanResponse(
         windows=windows,
         fresh_quota_available_at=fresh_at,
@@ -212,4 +225,5 @@ def build_plan(
         anchor_source=anchor_source,
         hours_after_wake=hours_after_wake,
         weekly_warning=weekly_warning,
+        quota_auth_error=quota_auth_error or None,
     )
