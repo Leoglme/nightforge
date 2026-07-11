@@ -3,6 +3,7 @@
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
+    <NightForgeDesktopUpdaterPanel />
   </UApp>
 </template>
 

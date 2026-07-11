@@ -9,6 +9,10 @@
     "process:default",
     "shell:allow-execute",
     {
+      "identifier": "shell:allow-spawn",
+      "allow": [{ "name": "nightforge-agent", "sidecar": true }]
+    },
+    {
       "identifier": "shell:allow-open",
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]
     },

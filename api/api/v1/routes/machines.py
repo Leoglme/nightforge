@@ -68,6 +68,42 @@ async def create_machine(
     return MachineCreated(**MachineResponse.model_validate(machine).model_dump(), agent_token=token)
 
 
+@router.post("/{machine_id}/reissue-token", response_model=MachineCreated)
+async def reissue_machine_token(
+    machine_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Rotate the agent token for an existing machine (desktop re-provisioning).
+
+    Args:
+        machine_id: The machine id.
+        current_user: The authenticated user.
+        db: Database session.
+
+    Returns:
+        The machine with a fresh plaintext agent token (shown once).
+
+    Raises:
+        HTTPException: If the machine is not found.
+    """
+    machine = (
+        db.query(Machine)
+        .filter(Machine.id == machine_id, Machine.user_id == current_user.id)
+        .first()
+    )
+    if not machine:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
+
+    token = secrets.token_urlsafe(32)
+    machine.agent_token_hash = get_password_hash(token)
+    db.commit()
+    db.refresh(machine)
+
+    return MachineCreated(**MachineResponse.model_validate(machine).model_dump(), agent_token=token)
+
+
 @router.delete("/{machine_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_machine(
     machine_id: int,

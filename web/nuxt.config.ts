@@ -23,8 +23,14 @@ export default defineNuxtConfig({
             'NightForge pilote Claude Code en autonomie pendant la nuit : files de prompts par projet, gestion du quota Claude Max, runs multi-machines, contrôle web et desktop.',
         },
         { name: 'theme-color', content: '#131312' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { name: 'apple-mobile-web-app-title', content: 'NightForge' },
       ],
       link: [
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'manifest', href: '/site.webmanifest' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {

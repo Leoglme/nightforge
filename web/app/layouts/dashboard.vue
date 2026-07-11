@@ -42,16 +42,16 @@
       </main>
 
       <nav
-        class="flex shrink-0 items-center justify-around border-t border-[var(--app-line)] bg-[var(--app-surface)] py-2 md:hidden"
+        class="mobile-tab-bar flex shrink-0 items-stretch justify-around border-t border-[var(--app-line)] bg-[var(--app-surface)] pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:hidden"
       >
         <NuxtLink
           v-for="link in links"
           :key="link.to"
           :to="link.to"
-          class="flex flex-col items-center gap-0.5 px-2 text-[0.65rem] text-[var(--app-ink-soft)]"
+          class="flex min-h-14 min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-1 px-2 text-[0.7rem] text-[var(--app-ink-soft)]"
           active-class="!text-[var(--app-ink)]"
         >
-          <UIcon :name="link.icon" class="text-base" />
+          <UIcon :name="link.icon" class="text-xl" />
           {{ link.label }}
         </NuxtLink>
       </nav>

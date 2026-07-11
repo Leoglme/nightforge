@@ -28,6 +28,20 @@ fn spawn_agent(app: &tauri::AppHandle) {
     }
 }
 
+/// Kill the running sidecar (if any) and start a fresh agent process.
+#[tauri::command]
+fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(state) = app.try_state::<AgentProcess>() {
+        if let Some(child) = state.0.lock().unwrap().take() {
+            child
+                .kill()
+                .map_err(|err| format!("Failed to stop agent sidecar: {err}"))?;
+        }
+    }
+    spawn_agent(&app);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -37,6 +51,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .manage(AgentProcess(std::sync::Mutex::new(None)))
+        .invoke_handler(tauri::generate_handler![restart_agent])
         .setup(|app| {
             spawn_agent(app.handle());
             Ok(())

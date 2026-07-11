@@ -24,6 +24,15 @@ export function createMachine(name: string): Promise<MachineCreated> {
 }
 
 /**
+ * Rotate the agent token for an existing machine (desktop re-provisioning).
+ * @param id - Machine id.
+ * @returns The machine with a fresh agent token.
+ */
+export function reissueMachineToken(id: number): Promise<MachineCreated> {
+  return api.post<MachineCreated>(`/api/v1/machines/${id}/reissue-token`)
+}
+
+/**
  * Delete a machine.
  * @param id - Machine id.
  * @returns Nothing.

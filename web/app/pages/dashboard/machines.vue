@@ -11,6 +11,17 @@
       </div>
       <UButton
         v-if="isDesktopApp"
+        color="neutral"
+        variant="outline"
+        icon="i-lucide-refresh-cw"
+        class="shrink-0"
+        :loading="restartingAgent"
+        @click="restartAgent"
+      >
+        <span class="hidden sm:inline">Redémarrer l'agent</span>
+      </UButton>
+      <UButton
+        v-if="isDesktopApp"
         color="primary"
         icon="i-lucide-monitor-check"
         class="shrink-0"
@@ -164,7 +175,8 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 const { t } = useI18n()
 const config = useRuntimeConfig()
 const apiBase = config.public.apiBase
-const { isDesktopApp, provisionThisMachine } = useMachineProvision()
+const { isDesktopApp, provisionThisMachine, restartLocalAgent, detectMachineName, syncLocalAgentIfProvisioned } =
+  useMachineProvision()
 
 const machines = ref<Machine[]>([])
 const showCreate = ref(false)
@@ -173,6 +185,7 @@ const createdToken = ref<string | null>(null)
 const creating = ref(false)
 const copied = ref(false)
 const provisioning = ref(false)
+const restartingAgent = ref(false)
 const provisionMessage = ref('')
 const provisionError = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
@@ -189,9 +202,13 @@ async function provision(): Promise<void> {
   provisionMessage.value = ''
   provisionError.value = false
   try {
+    const hostname = await detectMachineName()
+    const existing = machines.value.find((m) => m.name.toLowerCase() === hostname.toLowerCase())
     const machine = await provisionThisMachine()
     provisionError.value = false
-    provisionMessage.value = `« ${machine.name} » est enregistrée. L'agent va se connecter dans quelques secondes.`
+    provisionMessage.value = existing
+      ? `« ${machine.name} » est reconnectée. L'agent redémarre et devrait passer en ligne sous quelques secondes.`
+      : `« ${machine.name} » est enregistrée. L'agent redémarre et devrait passer en ligne sous quelques secondes.`
     await refresh()
   } catch (error) {
     provisionError.value = true
@@ -199,6 +216,29 @@ async function provision(): Promise<void> {
       error instanceof Error ? error.message : 'Impossible de configurer cette machine automatiquement.'
   } finally {
     provisioning.value = false
+  }
+}
+
+/**
+ * Restart the local agent sidecar (reloads ~/.nightforge/agent.json).
+ * @returns Nothing.
+ */
+async function restartAgent(): Promise<void> {
+  if (restartingAgent.value) {
+    return
+  }
+  restartingAgent.value = true
+  provisionMessage.value = ''
+  provisionError.value = false
+  try {
+    await restartLocalAgent()
+    provisionMessage.value = 'Agent redémarré — connexion en cours…'
+    await refresh()
+  } catch (error) {
+    provisionError.value = true
+    provisionMessage.value = error instanceof Error ? error.message : "Impossible de redémarrer l'agent local."
+  } finally {
+    restartingAgent.value = false
   }
 }
 
@@ -276,8 +316,20 @@ async function remove(id: number): Promise<void> {
   await refresh()
 }
 
-onMounted(() => {
-  refresh()
+onMounted(async () => {
+  await refresh()
+  if (isDesktopApp.value) {
+    const hostname = await detectMachineName()
+    const localMachine = machines.value.find((m) => m.name.toLowerCase() === hostname.toLowerCase())
+    if (localMachine && !localMachine.online) {
+      const restarted = await syncLocalAgentIfProvisioned()
+      if (restarted) {
+        provisionError.value = false
+        provisionMessage.value =
+          'Agent local redémarré automatiquement. Si le statut reste hors ligne, clique « Redémarrer l\u2019agent » ou « Ajouter cette machine ».'
+      }
+    }
+  }
   timer = setInterval(refresh, 5000)
 })
 

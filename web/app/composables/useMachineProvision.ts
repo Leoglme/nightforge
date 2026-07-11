@@ -1,5 +1,5 @@
 import type { MachineCreated } from '~/types'
-import { createMachine } from '~/services/machinesService'
+import { createMachine, listMachines, reissueMachineToken } from '~/services/machinesService'
 
 /**
  * Path of the shared provisioning file, relative to the user's home directory.
@@ -40,6 +40,29 @@ export function useMachineProvision() {
   }
 
   /**
+   * Read the shared provisioning file if present.
+   * @returns Parsed provisioning payload or null.
+   */
+  async function readProvisionFile(): Promise<{
+    agent_token?: string
+    machine_id?: number
+    api_base?: string
+    machine_name?: string
+  } | null> {
+    if (!isDesktopApp.value) {
+      return null
+    }
+    try {
+      const fs = await import('@tauri-apps/plugin-fs')
+      const text = await fs.readTextFile(PROVISION_FILE, { baseDir: fs.BaseDirectory.Home })
+      const data = JSON.parse(text) as unknown
+      return data && typeof data === 'object' ? (data as Record<string, unknown>) : null
+    } catch {
+      return null
+    }
+  }
+
+  /**
    * Write the shared provisioning file so the local agent can authenticate.
    * @param machine - The freshly created machine (with its one-time token).
    * @returns Nothing.
@@ -61,15 +84,57 @@ export function useMachineProvision() {
   }
 
   /**
+   * Restart the bundled agent sidecar so it reloads `~/.nightforge/agent.json`.
+   * @returns Nothing.
+   */
+  async function restartLocalAgent(): Promise<void> {
+    if (!isDesktopApp.value) {
+      return
+    }
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('restart_agent')
+  }
+
+  /**
    * Register the current machine and configure the local agent in one step.
-   * @returns The created machine.
+   * Reuses an existing machine with the same hostname and rotates its token when needed.
+   * @returns The created or refreshed machine.
    */
   async function provisionThisMachine(): Promise<MachineCreated> {
     const name = await detectMachineName()
-    const machine = await createMachine(name)
+    const machines = await listMachines().catch(() => [])
+    const existing = machines.find((machine) => machine.name.toLowerCase() === name.toLowerCase())
+
+    const machine = existing ? await reissueMachineToken(existing.id) : await createMachine(name)
+
     await writeProvisionFile(machine)
+    await restartLocalAgent()
     return machine
   }
 
-  return { isDesktopApp, provisionThisMachine, detectMachineName }
+  /**
+   * If this PC already has a provisioning file, restart the agent so it reconnects.
+   * @returns True when a restart was attempted.
+   */
+  async function syncLocalAgentIfProvisioned(): Promise<boolean> {
+    if (!isDesktopApp.value) {
+      return false
+    }
+    const provisioned = await readProvisionFile()
+    if (!provisioned?.agent_token?.trim()) {
+      return false
+    }
+    await restartLocalAgent()
+    return true
+  }
+
+  return {
+    isDesktopApp,
+    provisionThisMachine,
+    detectMachineName,
+    restartLocalAgent,
+    writeProvisionFile,
+    readProvisionFile,
+    syncLocalAgentIfProvisioned,
+  }
 }

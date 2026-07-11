@@ -13,7 +13,7 @@ from models.project import Project
 from models.project_machine_path import ProjectMachinePath
 from models.queue_item import QueueItem
 from models.user import User
-from schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
+from schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate, _slugify_name
 from schemas.project_path import ProjectPathResponse, ProjectPathSet
 from services.auth_service import get_current_active_user
 
@@ -79,10 +79,11 @@ async def create_project(
     Returns:
         The created project.
     """
+    repo = payload.github_repo or f"local/{_slugify_name(payload.name)}"
     project = Project(
         user_id=current_user.id,
         name=payload.name,
-        github_repo=payload.github_repo,
+        github_repo=repo,
         base_branch=payload.base_branch,
     )
     db.add(project)

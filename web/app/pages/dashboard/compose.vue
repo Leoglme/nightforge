@@ -2,37 +2,44 @@
   <div class="flex h-full flex-col">
     <!-- Unified launch toolbar: config lives in the Réglages drawer so the chat fills the page -->
     <div
-      class="flex shrink-0 items-center gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2 lg:px-6 lg:py-3"
+      class="flex shrink-0 flex-col gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2 lg:flex-row lg:items-center lg:gap-3 lg:px-6 lg:py-3"
     >
-      <UButton
-        color="neutral"
-        variant="outline"
-        icon="i-lucide-sliders-horizontal"
-        class="shrink-0"
-        @click="showLaunchSettings = true"
-      >
-        Réglages
-      </UButton>
+      <div class="flex items-center gap-2">
+        <UButton
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-sliders-horizontal"
+          class="shrink-0"
+          @click="showLaunchSettings = true"
+        >
+          Réglages
+        </UButton>
 
-      <div class="min-w-0 flex-1 truncate text-xs text-[var(--app-ink-soft)]">
-        <span>{{ totalMessages }} msg · {{ selectedIds.length }} proj</span>
-        <template v-if="selectedMachineName"> · {{ selectedMachineName }}</template>
-        <template v-if="freshTimeLabel">
-          · <span class="font-medium text-[var(--app-accent-ink)]">vierge {{ freshTimeLabel }}</span>
-        </template>
+        <UButton
+          color="primary"
+          icon="i-lucide-moon-star"
+          class="ml-auto shrink-0 lg:order-last lg:ml-0"
+          :disabled="selectedIds.length === 0 || !machineId || totalMessages === 0"
+          :loading="launching"
+          @click="launch"
+        >
+          Lancer la nuit
+        </UButton>
       </div>
 
-      <UButton
-        color="primary"
-        icon="i-lucide-moon-star"
-        class="shrink-0"
-        :disabled="selectedIds.length === 0 || !machineId || totalMessages === 0"
-        :loading="launching"
-        @click="launch"
+      <div
+        class="flex min-w-0 flex-col gap-0.5 text-xs text-[var(--app-ink-soft)] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-2 lg:min-w-0 lg:flex-1 lg:justify-end"
       >
-        <span class="hidden sm:inline">Lancer la nuit</span>
-        <span class="sm:hidden">Lancer</span>
-      </UButton>
+        <span>{{ launchSummary }}</span>
+        <template v-if="selectedMachineName">
+          <span class="hidden sm:inline">·</span>
+          <span class="truncate font-medium text-[var(--app-ink)]">{{ selectedMachineName }}</span>
+        </template>
+        <template v-if="freshTimeLabel">
+          <span class="hidden md:inline">·</span>
+          <span class="hidden font-medium text-[var(--app-accent-ink)] md:inline"> vierge {{ freshTimeLabel }} </span>
+        </template>
+      </div>
     </div>
 
     <!-- 3-column body -->
@@ -317,12 +324,35 @@
         <UFormField label="Nom">
           <UInput v-model="createForm.name" class="w-full" size="lg" required placeholder="Mon projet" />
         </UFormField>
-        <UFormField label="Dépôt GitHub" hint="owner/repo ou URL complète">
-          <UInput v-model="createForm.github_repo" class="w-full" size="lg" required placeholder="dibodev/mon-projet" />
+        <UFormField
+          label="Dépôt GitHub"
+          hint="Optionnel pour l'instant — nécessaire avant de lancer une nuit (push des branches). Tu peux le renseigner dans Réglages."
+        >
+          <UInput
+            v-model="createForm.github_repo"
+            class="w-full"
+            size="lg"
+            placeholder="dibodev/mon-projet (optionnel)"
+          />
         </UFormField>
-        <UFormField label="Branche de base">
+        <UFormField label="Branche de base" hint="Par défaut : main">
           <UInput v-model="createForm.base_branch" class="w-full" size="lg" placeholder="main" />
         </UFormField>
+        <UFormField
+          v-if="machineId && selectedMachineName"
+          :label="`Chemin local sur ${selectedMachineName}`"
+          hint="Où le dépôt est cloné sur ce PC — l'agent y lance Claude Code."
+        >
+          <UInput
+            v-model="createForm.local_path"
+            class="w-full"
+            size="lg"
+            placeholder="C:\\Users\\moi\\Projects\\mon-projet"
+          />
+        </UFormField>
+        <p v-else class="text-xs text-[var(--app-ink-soft)]">
+          Choisis une machine dans les réglages de lancement pour renseigner le chemin local dès la création.
+        </p>
       </form>
 
       <template #footer>
@@ -333,7 +363,7 @@
           color="primary"
           class="flex-1"
           :loading="savingProject"
-          :disabled="!createForm.name.trim() || !createForm.github_repo.trim()"
+          :disabled="!createForm.name.trim()"
         >
           Créer
         </UButton>
@@ -465,7 +495,7 @@ const showCreateProject = ref(false)
 const showSettings = ref(false)
 const showLaunchSettings = ref(false)
 
-const createForm = reactive({ name: '', github_repo: '', base_branch: 'main' })
+const createForm = reactive({ name: '', github_repo: '', base_branch: 'main', local_path: '' })
 const savingProject = ref(false)
 
 const settingsProject = ref<Project | null>(null)
@@ -508,6 +538,14 @@ const activeQueue = computed(() => queueByProject.value[activeId.value] ?? [])
 const totalMessages = computed(() =>
   selectedIds.value.reduce((sum, id) => sum + (messagesByProject.value[id]?.length ?? 0), 0),
 )
+
+const launchSummary = computed(() => {
+  const messages = totalMessages.value
+  const projects = selectedIds.value.length
+  const messageLabel = messages <= 1 ? 'message' : 'messages'
+  const projectLabel = projects <= 1 ? 'projet' : 'projets'
+  return `${messages} ${messageLabel} · ${projects} ${projectLabel}`
+})
 
 /**
  * Count messages for a project (sidebar badge).
@@ -628,6 +666,7 @@ function openCreateProject(): void {
   createForm.name = ''
   createForm.github_repo = ''
   createForm.base_branch = 'main'
+  createForm.local_path = ''
   showPicker.value = false
   showCreateProject.value = true
 }
@@ -646,16 +685,26 @@ function backToPicker(): void {
  * @returns Nothing.
  */
 async function createNewProject(): Promise<void> {
-  if (!createForm.name.trim() || !createForm.github_repo.trim() || savingProject.value) {
+  if (!createForm.name.trim() || savingProject.value) {
     return
   }
   savingProject.value = true
   try {
     const project = await createProject({
       name: createForm.name.trim(),
-      github_repo: createForm.github_repo.trim(),
+      github_repo: createForm.github_repo.trim() || undefined,
       base_branch: createForm.base_branch.trim() || 'main',
     })
+    if (machineId.value && createForm.local_path.trim()) {
+      await setProjectPath(project.id, {
+        machine_id: machineId.value,
+        local_path: createForm.local_path.trim(),
+      })
+      pathByProject.value[project.id] = {
+        ...(pathByProject.value[project.id] ?? {}),
+        [machineId.value]: createForm.local_path.trim(),
+      }
+    }
     await refreshProjects()
     const created = projects.value.find((p) => p.id === project.id) ?? project
     await toggleProject(created)
