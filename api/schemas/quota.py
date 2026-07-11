@@ -20,6 +20,10 @@ class QuotaPlanRequest(BaseModel):
     machine_id: Optional[int] = Field(
         default=None, description="Anchor estimates on this machine's latest real reset data"
     )
+    wait_for_fresh_quota: bool = Field(
+        default=True,
+        description="When true, wait for the next bucket reset before window 1 if the current bucket is in use",
+    )
 
 
 class QuotaWindow(BaseModel):
@@ -40,6 +44,14 @@ class QuotaPlanResponse(BaseModel):
     windows: List[QuotaWindow]
     fresh_quota_available_at: datetime = Field(
         ..., description="When a full, empty quota is available after all planned windows"
+    )
+    wait_until: Optional[datetime] = Field(
+        default=None,
+        description="When window 1 actually starts (after waiting for a fresh bucket reset)",
+    )
+    anchor_source: Optional[str] = Field(
+        default=None,
+        description="How window 1 was anchored: live, snapshot, or none (pure estimate)",
     )
     hours_after_wake: Optional[float] = Field(
         default=None, description="Delay between fresh quota and wake_at (negative = before wake)"

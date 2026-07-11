@@ -10,11 +10,9 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from enums.queue_item_status import QueueItemStatus
 from enums.run_status import RunStatus
-from enums.quota_bucket import QuotaBucket
 from models.machine import Machine
 from models.project import Project
 from models.project_machine_path import ProjectMachinePath
-from models.quota_snapshot import QuotaSnapshot
 from models.project_message import ProjectMessage
 from models.queue_item import QueueItem
 from models.run import Run
@@ -27,38 +25,20 @@ from schemas.run import RunAddQuotas, RunCreate, RunEventResponse, RunResponse
 from schemas.run_message import RunMessageCreate, RunMessageResponse, RunMessageRetry, RunProjectSummary
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user
-from services.quota_planner import anchor_reset_at_from_snapshot, build_plan, normalize_utilization
+from services.quota_anchor import resolve_machine_quota_anchor
+from services.quota_planner import build_plan
 from services.run_dispatcher import dispatch_run, push_run_update
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
-def _machine_quota_anchor(db: Session, machine_id: int) -> tuple[datetime | None, float | None]:
-    """
-    Latest real five-hour bucket reading for a machine, if reported by its agent.
-
-    Args:
-        db: Database session.
-        machine_id: Target machine.
-
-    Returns:
-        Tuple of (timezone-aware UTC reset time, utilization), either may be None.
-    """
-    snapshot = (
-        db.query(QuotaSnapshot)
-        .filter(
-            QuotaSnapshot.machine_id == machine_id,
-            QuotaSnapshot.bucket == QuotaBucket.FIVE_HOUR.value,
-        )
-        .order_by(QuotaSnapshot.created_at.desc())
-        .first()
+async def _machine_quota_anchor(
+    db: Session, machine_id: int, user_id: int
+) -> tuple[datetime | None, float | None]:
+    reset_at, utilization, _source = await resolve_machine_quota_anchor(
+        db, machine_id, user_id
     )
-    if snapshot is None:
-        return None, None
-    reset_at = (
-        anchor_reset_at_from_snapshot(snapshot.resets_at) if snapshot.resets_at else None
-    )
-    return reset_at, normalize_utilization(snapshot.utilization)
+    return reset_at, utilization
 
 
 def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_id: int) -> None:
@@ -112,15 +92,18 @@ def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_i
         )
 
 
-def _rebuild_planned_timeline(db: Session, run: Run) -> None:
+async def _rebuild_planned_timeline(db: Session, run: Run, user_id: int) -> None:
     """Recalculate and persist the quota plan after the budget changes."""
-    anchor_reset_at, anchor_utilization = _machine_quota_anchor(db, run.machine_id)
+    anchor_reset_at, anchor_utilization = await _machine_quota_anchor(
+        db, run.machine_id, user_id
+    )
     plan = build_plan(
         QuotaPlanRequest(
             quota_count=run.quota_count,
             start_at=run.started_at or run.scheduled_at,
             wake_at=run.window_end,
             machine_id=run.machine_id,
+            wait_for_fresh_quota=False,
         ),
         anchor_reset_at=anchor_reset_at,
         anchor_utilization=anchor_utilization,
@@ -196,13 +179,16 @@ async def create_run(
     if len(projects) != len(set(payload.project_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project(s)")
 
-    anchor_reset_at, anchor_utilization = _machine_quota_anchor(db, payload.machine_id)
+    anchor_reset_at, anchor_utilization = await _machine_quota_anchor(
+        db, payload.machine_id, current_user.id
+    )
     plan = build_plan(
         QuotaPlanRequest(
             quota_count=payload.quota_count,
             start_at=payload.scheduled_at,
             wake_at=payload.window_end,
             machine_id=payload.machine_id,
+            wait_for_fresh_quota=payload.wait_for_fresh_quota,
         ),
         anchor_reset_at=anchor_reset_at,
         anchor_utilization=anchor_utilization,
@@ -569,7 +555,7 @@ async def add_run_quotas(
         )
 
     run.quota_count = min(10, run.quota_count + payload.add)
-    _rebuild_planned_timeline(db, run)
+    await _rebuild_planned_timeline(db, run, current_user.id)
     db.commit()
     db.refresh(run)
 

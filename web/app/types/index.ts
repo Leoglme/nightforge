@@ -76,6 +76,8 @@ export interface QuotaWindow {
 export interface QuotaPlan {
   windows: QuotaWindow[]
   fresh_quota_available_at: string
+  wait_until?: string | null
+  anchor_source?: 'live' | 'snapshot' | 'none' | null
   hours_after_wake?: number | null
   weekly_warning?: string | null
 }

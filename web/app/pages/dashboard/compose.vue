@@ -289,6 +289,12 @@
         <UFormField label="Quotas (5 h)">
           <UInput v-model.number="quotaCount" type="number" min="1" max="10" class="w-full" size="lg" />
         </UFormField>
+        <UFormField
+          label="Attendre le prochain quota vierge"
+          help="Recommandé : la nuit démarre au reset Claude réel (~23h), pas tout de suite."
+        >
+          <USwitch v-model="waitForFreshQuota" />
+        </UFormField>
         <UFormField label="Fin de fenêtre" help="Aujourd'hui, ou demain si l'heure est déjà passée.">
           <UInput v-model="wakeAt" type="time" class="w-full" size="lg" />
         </UFormField>
@@ -524,6 +530,7 @@ const threadEl = ref<HTMLElement | null>(null)
 
 const machineId = ref<number | undefined>(undefined)
 const quotaCount = ref(1)
+const waitForFreshQuota = ref(true)
 const wakeAt = ref('')
 const plan = ref<QuotaPlan | null>(null)
 const planning = ref(false)
@@ -1097,6 +1104,7 @@ async function computePlan(): Promise<void> {
       quota_count: quotaCount.value,
       wake_at: resolveWakeIso(),
       machine_id: machineId.value ?? null,
+      wait_for_fresh_quota: waitForFreshQuota.value,
     })
   } catch {
     plan.value = null
@@ -1132,6 +1140,7 @@ async function launch(): Promise<void> {
       quota_count: quotaCount.value,
       parallel: selectedIds.value.length > 1,
       window_end: resolveWakeIso(),
+      wait_for_fresh_quota: waitForFreshQuota.value,
     })
     toast.add({ title: 'Nuit lancée', color: 'success' })
     router.push(`/dashboard/runs/${run.id}`)
@@ -1156,7 +1165,7 @@ watch(activeId, async (id) => {
 })
 
 // Keep the quota timeline live: recompute whenever the machine, quota count or wake time change.
-watch([machineId, quotaCount, wakeAt], scheduleComputePlan)
+watch([machineId, quotaCount, wakeAt, waitForFreshQuota], scheduleComputePlan)
 
 onMounted(async () => {
   ;[projects.value, machines.value] = await Promise.all([
@@ -1165,8 +1174,13 @@ onMounted(async () => {
   ])
 
   // Anchor the timeline on the real reset straight away when there's only one machine.
-  if (!machineId.value && machines.value.length === 1) {
-    machineId.value = machines.value[0]!.id
+  if (!machineId.value) {
+    const online = machines.value.find((m) => m.online)
+    if (online) {
+      machineId.value = online.id
+    } else if (machines.value.length === 1) {
+      machineId.value = machines.value[0]!.id
+    }
   }
 
   const restored = restoreSelection().filter((id) => projects.value.some((p) => p.id === id))

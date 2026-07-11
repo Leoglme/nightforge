@@ -24,6 +24,7 @@ from .ws_client import WsClient
 logger = logging.getLogger(__name__)
 
 SATURATION_THRESHOLD = 0.85
+ACTIVE_BUCKET_THRESHOLD = 0.02
 
 
 @dataclass
@@ -366,14 +367,13 @@ class Worker:
         """
         wait_until: Optional[datetime] = None
         reading = await quota_reader.read_five_hour(self._last_reset_hint)
-        if (
-            reading is not None
-            and reading.utilization >= SATURATION_THRESHOLD
-            and reading.resets_at is not None
-        ):
+        if reading is not None and reading.resets_at is not None:
             live_wait = _coerce_wait_until(reading.resets_at)
             if live_wait is not None and live_wait > _utc_now():
-                wait_until = live_wait
+                if reading.utilization >= SATURATION_THRESHOLD:
+                    wait_until = live_wait
+                elif reading.utilization >= ACTIVE_BUCKET_THRESHOLD:
+                    wait_until = live_wait
 
         if wait_until is None and planned_wait_until is not None:
             planned_wait = _coerce_wait_until(planned_wait_until)
@@ -389,7 +389,7 @@ class Worker:
         await self._emit(
             run_id,
             "info",
-            f"Quota saturé — attente jusqu'à {_format_local_time(wait_until)}",
+            f"Attente du prochain quota vierge — démarrage vers {_format_local_time(wait_until)}",
         )
         resumed = await self._wait_for_quota(wait_until)
         if resumed:

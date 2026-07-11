@@ -2,7 +2,8 @@
 Quota planner — turns "N quotas from time T" into a per-window timeline.
 
 When the machine reports OAuth ``resets_at`` / utilization, window 1 is anchored on that
-real bucket. Further quotas chain forward in 5 h steps from window 1's end.
+real bucket. With ``wait_for_fresh_quota`` (default), a partially used bucket schedules
+the first window at the real reset time instead of starting immediately.
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ from schemas.quota import QuotaPlanRequest, QuotaPlanResponse, QuotaWindow
 QUOTA_HOURS = 5
 # Bucket considered full enough to wait for the real ``resets_at`` before window 1.
 SATURATION_THRESHOLD = 0.85
+# Any meaningful usage triggers a wait when ``wait_for_fresh_quota`` is enabled.
+ACTIVE_BUCKET_THRESHOLD = 0.02
 
 
 def normalize_utilization(value: Optional[float]) -> Optional[float]:
@@ -58,7 +61,7 @@ def _aware_utc(value: datetime) -> datetime:
 
 def _snap_bucket_start(start: datetime, begins_at: datetime, ends_at: datetime) -> datetime:
     """
-  Snap the displayed bucket start to a round hour when already inside the window.
+    Snap the displayed bucket start to a round hour when already inside the window.
 
     Args:
         start: Current time.
@@ -75,10 +78,23 @@ def _snap_bucket_start(start: datetime, begins_at: datetime, ends_at: datetime) 
     return begins_at
 
 
+def _should_wait_for_fresh_reset(
+    utilization: Optional[float],
+    wait_for_fresh_quota: bool,
+) -> bool:
+    if utilization is None:
+        return wait_for_fresh_quota
+    if utilization >= SATURATION_THRESHOLD:
+        return True
+    return wait_for_fresh_quota and utilization >= ACTIVE_BUCKET_THRESHOLD
+
+
 def window_1_bounds(
     start: datetime,
     anchor_reset_at: Optional[datetime],
     anchor_utilization: Optional[float],
+    *,
+    wait_for_fresh_quota: bool = True,
 ) -> Tuple[datetime, datetime, bool]:
     """
     Compute window 1 start/end, preferring live OAuth bucket data when available.
@@ -87,6 +103,8 @@ def window_1_bounds(
         start: Planned or actual launch time (aware UTC).
         anchor_reset_at: Real ``resets_at`` from the machine snapshot, if any.
         anchor_utilization: Latest five-hour utilization for the machine.
+        wait_for_fresh_quota: When True, schedule window 1 at the next reset if the
+            current bucket is already in use.
 
     Returns:
         Tuple of (starts_at, resets_at, used_real_oauth_data).
@@ -98,23 +116,22 @@ def window_1_bounds(
     if anchor is None and utilization is None:
         return start, start + timedelta(hours=QUOTA_HOURS), False
 
-    # Saturated: the bucket is empty again only after the real reset.
-    if (
-        anchor is not None
-        and utilization is not None
-        and utilization >= SATURATION_THRESHOLD
-        and anchor > start
-    ):
-        return anchor, anchor + timedelta(hours=QUOTA_HOURS), True
-
     # Active bucket with a future OAuth end time.
     if anchor is not None and anchor > start:
+        if _should_wait_for_fresh_reset(utilization, wait_for_fresh_quota):
+            return anchor, anchor + timedelta(hours=QUOTA_HOURS), True
+
         ends_at = anchor
         begins_at = _snap_bucket_start(start, ends_at - timedelta(hours=QUOTA_HOURS), ends_at)
         return begins_at, ends_at, True
 
     # Stale ``resets_at`` but fresh utilization — infer remaining window from usage.
     if utilization is not None and utilization < SATURATION_THRESHOLD:
+        if _should_wait_for_fresh_reset(utilization, wait_for_fresh_quota):
+            remaining_hours = max(0.25, QUOTA_HOURS * (1.0 - utilization))
+            wait_until = start + timedelta(hours=remaining_hours)
+            return wait_until, wait_until + timedelta(hours=QUOTA_HOURS), True
+
         remaining_hours = max(0.25, QUOTA_HOURS * (1.0 - utilization))
         ends_at = start + timedelta(hours=remaining_hours)
         begins_at = _snap_bucket_start(
@@ -130,6 +147,7 @@ def build_plan(
     anchor_reset_at: Optional[datetime] = None,
     anchor_utilization: Optional[float] = None,
     weekly_budget_left_fraction: Optional[float] = None,
+    anchor_source: Optional[str] = None,
 ) -> QuotaPlanResponse:
     """
     Build the quota timeline for the requested number of quotas.
@@ -139,6 +157,7 @@ def build_plan(
         anchor_reset_at: Real ``resets_at`` of the machine's current five-hour bucket, if any.
         anchor_utilization: Latest five-hour utilization for anchoring a saturated bucket.
         weekly_budget_left_fraction: Remaining weekly budget (0.0 -> 1.0) for the warning.
+        anchor_source: How the anchor was resolved (``live``, ``snapshot``, ``none``).
 
     Returns:
         The planned timeline with per-window start/reset and the fresh-quota time.
@@ -150,7 +169,12 @@ def build_plan(
         wake_at = _aware_utc(wake_at)
 
     windows: List[QuotaWindow] = []
-    w1_start, w1_end, w1_real = window_1_bounds(start, anchor_reset_at, anchor_utilization)
+    w1_start, w1_end, w1_real = window_1_bounds(
+        start,
+        anchor_reset_at,
+        anchor_utilization,
+        wait_for_fresh_quota=payload.wait_for_fresh_quota,
+    )
     cursor = w1_start
     for i in range(payload.quota_count):
         if i == 0:
@@ -167,6 +191,7 @@ def build_plan(
         cursor = resets_at
 
     fresh_at = windows[-1].resets_at
+    wait_until = w1_start if w1_real and w1_start > start else None
 
     hours_after_wake: Optional[float] = None
     if wake_at is not None:
@@ -183,6 +208,8 @@ def build_plan(
     return QuotaPlanResponse(
         windows=windows,
         fresh_quota_available_at=fresh_at,
+        wait_until=wait_until,
+        anchor_source=anchor_source,
         hours_after_wake=hours_after_wake,
         weekly_warning=weekly_warning,
     )

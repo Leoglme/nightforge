@@ -74,6 +74,74 @@ def _parse_event_timestamp(raw: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_resets_at(raw: Any) -> Optional[datetime]:
+    """
+    Parse a bucket reset time from OAuth (ISO string or Unix epoch seconds).
+
+    Args:
+        raw: Value from the usage API.
+
+    Returns:
+        Timezone-aware UTC datetime, or None.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)):
+        return datetime.fromtimestamp(float(raw), tz=timezone.utc)
+    if isinstance(raw, str):
+        parsed = _parse_event_timestamp(raw)
+        if parsed is None:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _parse_five_hour_bucket(payload: dict[str, Any]) -> Optional[QuotaReading]:
+    """
+    Extract the rolling 5-hour session bucket from an OAuth usage payload.
+
+    Supports the newer ``limits[]`` shape (``kind: session``) and the legacy
+    flat ``five_hour`` key.
+    """
+    limits = payload.get("limits")
+    if isinstance(limits, list):
+        for entry in limits:
+            if not isinstance(entry, dict) or entry.get("kind") != "session":
+                continue
+            utilization = entry.get("percent")
+            if utilization is None:
+                utilization = entry.get("utilization")
+            if utilization is None:
+                utilization = entry.get("used_percentage")
+            if not isinstance(utilization, (int, float)):
+                continue
+            return QuotaReading(
+                bucket="five_hour",
+                utilization=_normalize_utilization(float(utilization)),
+                resets_at=_parse_resets_at(entry.get("resets_at")),
+            )
+
+    bucket = payload.get("five_hour")
+    if not isinstance(bucket, dict):
+        return None
+
+    utilization = bucket.get("utilization")
+    if utilization is None:
+        utilization = bucket.get("used_percentage")
+    if utilization is None:
+        utilization = bucket.get("percent")
+    if not isinstance(utilization, (int, float)):
+        return None
+
+    return QuotaReading(
+        bucket="five_hour",
+        utilization=_normalize_utilization(float(utilization)),
+        resets_at=_parse_resets_at(bucket.get("resets_at")),
+    )
+
+
 def _load_oauth_block() -> Optional[dict[str, Any]]:
     path = _credentials_path()
     if not path.is_file():
@@ -159,19 +227,9 @@ async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
         return None
 
     payload = response.json()
-    bucket = payload.get("five_hour")
-    if not isinstance(bucket, dict):
+    if not isinstance(payload, dict):
         return None
-
-    utilization = bucket.get("utilization")
-    if not isinstance(utilization, (int, float)):
-        return None
-
-    return QuotaReading(
-        bucket="five_hour",
-        utilization=_normalize_utilization(float(utilization)),
-        resets_at=_parse_event_timestamp(bucket.get("resets_at")),
-    )
+    return _parse_five_hour_bucket(payload)
 
 
 async def _read_oauth_usage() -> Optional[QuotaReading]:

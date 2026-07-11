@@ -26,6 +26,7 @@ export function createRun(payload: {
   parallel: boolean
   scheduled_at?: string | null
   window_end?: string | null
+  wait_for_fresh_quota?: boolean
 }): Promise<Run> {
   return api.post<Run>('/api/v1/runs', payload)
 }

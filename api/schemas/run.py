@@ -20,6 +20,10 @@ class RunCreate(BaseModel):
     window_end: Optional[datetime] = Field(
         default=None, description="Hard stop; no new quota is started past this time"
     )
+    wait_for_fresh_quota: bool = Field(
+        default=True,
+        description="Wait for the next bucket reset before the first Claude prompt when the current bucket is in use",
+    )
 
 
 class RunAddQuotas(BaseModel):

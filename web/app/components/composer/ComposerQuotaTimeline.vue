@@ -37,27 +37,25 @@
         </li>
       </ol>
 
-      <!-- Fresh quota callout -->
+      <!-- Launch / fresh quota callout -->
       <div
         class="mt-2 flex items-start gap-2 rounded-lg border border-[var(--app-accent)]/40 bg-[var(--app-accent-soft)] px-3 py-2"
       >
         <UIcon name="i-lucide-sparkles" class="mt-0.5 shrink-0 text-[var(--app-accent-ink)]" />
         <div class="min-w-0 text-sm">
           <div class="font-semibold text-[var(--app-accent-ink)]">
-            Quota vierge dispo à {{ formatTimeLabelFr(plan.fresh_quota_available_at) }}
+            <template v-if="launchLabel"> Démarrage prévu à {{ launchLabel }} </template>
+            <template v-else> Quota vierge dispo à {{ formatTimeLabelFr(plan.fresh_quota_available_at) }} </template>
           </div>
           <div class="text-xs text-[var(--app-ink-soft)]">
-            {{ freshRelative }}<span v-if="wakeText"> · {{ wakeText }}</span>
+            {{ launchRelative }}<span v-if="wakeText"> · {{ wakeText }}</span>
           </div>
         </div>
       </div>
 
-      <p v-if="firstEstimated" class="mt-2 flex items-start gap-1.5 text-xs text-[var(--app-ink-soft)]">
+      <p v-if="infoMessage" class="mt-2 flex items-start gap-1.5 text-xs text-[var(--app-ink-soft)]">
         <UIcon name="i-lucide-info" class="mt-0.5 shrink-0" />
-        <span>
-          Estimation depuis maintenant. Choisis une machine en ligne pour caler le créneau sur le bucket Claude réel
-          (heure de fin lue via l'agent).
-        </span>
+        <span>{{ infoMessage }}</span>
       </p>
 
       <UAlert
@@ -94,15 +92,51 @@ const { t } = useI18n()
 const firstEstimated = computed(() => props.plan?.windows[0]?.estimated ?? false)
 
 /**
- * Human-friendly relative delay until the fresh quota (e.g. "dans ~7 h").
+ * ISO timestamp when the run actually starts (after waiting for reset), if any.
  */
-const freshRelative = computed(() => {
+const launchAt = computed(() => props.plan?.wait_until ?? null)
+
+/**
+ * Human label for the planned launch instant.
+ */
+const launchLabel = computed(() => {
+  if (!launchAt.value) {
+    return ''
+  }
+  const diffMs = parseApiDateTime(launchAt.value).getTime() - Date.now()
+  if (diffMs <= 60_000) {
+    return ''
+  }
+  return formatTimeLabelFr(launchAt.value)
+})
+
+/**
+ * Contextual helper text under the timeline.
+ */
+const infoMessage = computed(() => {
+  if (!props.plan || !firstEstimated.value) {
+    if (props.plan?.anchor_source === 'live') {
+      return 'Créneau calé sur le bucket Claude lu en direct via l’agent.'
+    }
+    if (props.plan?.anchor_source === 'snapshot') {
+      return 'Créneau basé sur le dernier relevé quota de la machine (agent peut-être hors ligne).'
+    }
+    return ''
+  }
+  return 'Estimation depuis maintenant. Choisis une machine en ligne pour lire le reset Claude réel (OAuth via l’agent).'
+})
+
+/**
+ * Human-friendly relative delay until launch or fresh quota.
+ */
+const launchRelative = computed(() => {
   if (!props.plan) {
     return ''
   }
-  const diffMs = parseApiDateTime(props.plan.fresh_quota_available_at).getTime() - Date.now()
+  const target = launchAt.value ?? props.plan.fresh_quota_available_at
+  const diffMs = parseApiDateTime(target).getTime() - Date.now()
   if (diffMs <= 0) {
-    return 'disponible maintenant'
+    return launchAt.value ? 'démarrage imminent' : 'disponible maintenant'
   }
   const totalMin = Math.round(diffMs / 60000)
   const h = Math.floor(totalMin / 60)

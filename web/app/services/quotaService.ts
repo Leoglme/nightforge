@@ -16,6 +16,7 @@ export function planQuota(payload: {
   start_at?: string | null
   wake_at?: string | null
   machine_id?: number | null
+  wait_for_fresh_quota?: boolean
 }): Promise<QuotaPlan> {
   return api.post<QuotaPlan>('/api/v1/quota/plan', payload)
 }
