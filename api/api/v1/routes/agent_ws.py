@@ -129,8 +129,12 @@ async def agent_socket(websocket: WebSocket, token: str = Query(...)) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        await agent_hub.unregister_agent(machine_id)
-        _set_machine_online(machine_id, False, MachineStatus.OFFLINE.value)
+        # Only mark offline when THIS socket still owned the hub slot. A duplicate
+        # agent exiting must not wipe a newer live connection (common after updates /
+        # restarts that leave orphan nightforge-agent.exe processes).
+        cleared = await agent_hub.unregister_agent(machine_id, websocket)
+        if cleared:
+            _set_machine_online(machine_id, False, MachineStatus.OFFLINE.value)
 
 
 async def _handle_agent_message(machine_id: int, message: dict) -> None:

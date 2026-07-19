@@ -31,24 +31,70 @@ class AgentHub:
         """
         Register a connected agent for a machine.
 
+        If another socket was already registered for the same machine, it is closed so
+        only one live agent owns the slot (prevents duplicate sidecars from fighting).
+
         Args:
             machine_id: The machine id.
             ws: The agent WebSocket.
         """
+        previous: Optional[WebSocket] = None
         async with self._lock:
+            previous = self._agents.get(machine_id)
             self._agents[machine_id] = ws
+        if previous is not None and previous is not ws:
+            logger.info("Replacing previous agent connection: machine=%s", machine_id)
+            try:
+                await previous.close(code=4000)
+            except Exception:  # noqa: BLE001
+                pass
         logger.info("Agent connected: machine=%s", machine_id)
 
-    async def unregister_agent(self, machine_id: int) -> None:
+    async def unregister_agent(self, machine_id: int, ws: Optional[WebSocket] = None) -> bool:
         """
         Remove an agent connection.
+
+        When ``ws`` is provided, the slot is cleared only if it still points at that
+        socket. This avoids a stale disconnect (old duplicate agent) wiping the newer
+        live connection and marking the machine offline incorrectly.
+
+        Args:
+            machine_id: The machine id.
+            ws: Optional socket that is disconnecting.
+
+        Returns:
+            True if the hub slot was cleared (caller should mark the machine offline).
+        """
+        async with self._lock:
+            current = self._agents.get(machine_id)
+            if ws is not None and current is not None and current is not ws:
+                logger.info(
+                    "Ignoring stale agent disconnect: machine=%s (newer connection active)",
+                    machine_id,
+                )
+                return False
+            if current is None:
+                return False
+            self._agents.pop(machine_id, None)
+        logger.info("Agent disconnected: machine=%s", machine_id)
+        return True
+
+    async def disconnect_agent(self, machine_id: int) -> None:
+        """
+        Force-close the live agent socket for a machine (e.g. after token rotation).
 
         Args:
             machine_id: The machine id.
         """
         async with self._lock:
-            self._agents.pop(machine_id, None)
-        logger.info("Agent disconnected: machine=%s", machine_id)
+            ws = self._agents.pop(machine_id, None)
+        if ws is None:
+            return
+        logger.info("Disconnecting agent after control-plane change: machine=%s", machine_id)
+        try:
+            await ws.close(code=4001)
+        except Exception:  # noqa: BLE001
+            pass
 
     def is_online(self, machine_id: int) -> bool:
         """
@@ -85,7 +131,7 @@ class AgentHub:
                 machine_id,
                 exc,
             )
-            await self.unregister_agent(machine_id)
+            await self.unregister_agent(machine_id, ws)
             return False
 
     async def request_agent(

@@ -8,6 +8,7 @@
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
@@ -27,6 +28,9 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Holds the spawned agent child and the last spawn error for diagnostics.
 struct AgentProcess {
     child: Mutex<Option<CommandChild>>,
+    /// Incremented on every spawn/stop so a stale watchdog cannot clear a newer child
+    /// or respawn a second agent after a restart.
+    generation: AtomicU64,
     last_error: Mutex<Option<String>>,
     /// When true, a sidecar exit must not trigger an automatic respawn (updates, manual stop).
     intentional_stop: Mutex<bool>,
@@ -40,11 +44,20 @@ impl AgentProcess {
     fn new() -> Self {
         Self {
             child: Mutex::new(None),
+            generation: AtomicU64::new(0),
             last_error: Mutex::new(None),
             intentional_stop: Mutex::new(false),
             block_respawn: Mutex::new(false),
             shutting_down: Mutex::new(false),
         }
+    }
+
+    fn bump_generation(&self) -> u64 {
+        self.generation.fetch_add(1, Ordering::SeqCst) + 1
+    }
+
+    fn current_generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
     }
 
     fn set_error(&self, message: Option<String>) {
@@ -98,7 +111,13 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    if !state.is_running() && agent_processes_running() {
+    // Never stack a second sidecar on top of a tracked one (leaks orphans + races online).
+    if state.is_running() {
+        println!("NightForge agent sidecar already running — skip spawn");
+        return Ok(());
+    }
+
+    if agent_processes_running() {
         kill_all_agent_processes();
     }
 
@@ -110,15 +129,20 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
             .spawn()
         {
             Ok((mut rx, child)) => {
+                let generation = state.bump_generation();
                 *state.child.lock().unwrap() = Some(child);
                 state.set_error(None);
-                println!("NightForge agent sidecar started");
+                println!("NightForge agent sidecar started (generation {generation})");
                 let app_handle = app.clone();
                 thread::spawn(move || {
                     while let Some(event) = rx.blocking_recv() {
                         if let CommandEvent::Terminated(payload) = event {
                             eprintln!("Agent sidecar exited: {payload:?}");
                             if let Some(state) = app_handle.try_state::<AgentProcess>() {
+                                // Stale watchdog after restart: do not touch the newer child.
+                                if state.current_generation() != generation {
+                                    return;
+                                }
                                 state.child.lock().unwrap().take();
                                 if state.intentional_stop()
                                     || state.block_respawn()
@@ -127,7 +151,8 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
                                     return;
                                 }
                                 thread::sleep(Duration::from_millis(800));
-                                if state.intentional_stop()
+                                if state.current_generation() != generation
+                                    || state.intentional_stop()
                                     || state.block_respawn()
                                     || state.shutting_down()
                                 {
@@ -216,8 +241,14 @@ enum StopMode {
 }
 
 /// Stop the sidecar. On Update/Shutdown, force-kill the process tree with taskkill /T.
+/// Soft / Restart also reap orphan ``nightforge-agent.exe`` processes: a soft kill of
+/// only the tracked child left duplicates holding the singleton mutex, so the freshly
+/// spawned sidecar exited immediately while the stale orphan kept the machine flaky.
 fn stop_agent_sidecar_sync(state: &AgentProcess, mode: StopMode) {
     state.set_intentional_stop(true);
+    // Invalidate every watchdog so a Terminated event from the process we are about
+    // to kill cannot clear a child spawned by a concurrent restart.
+    state.bump_generation();
     if mode == StopMode::Update || mode == StopMode::Shutdown {
         state.set_block_respawn(true);
     }
@@ -237,11 +268,9 @@ fn stop_agent_sidecar_sync(state: &AgentProcess, mode: StopMode) {
         thread::sleep(grace);
     }
 
-    // Always kill the process tree on update/shutdown so orphans and children
-    // (claude, agent, …) cannot keep running after the UI is gone.
-    if mode == StopMode::Update || mode == StopMode::Shutdown {
-        kill_all_agent_processes();
-    }
+    // Always reap orphans. Duplicate agents share one log file, hammer Claude OAuth
+    // (429 storms), and race the control-plane online flag.
+    kill_all_agent_processes();
 
     state.set_error(None);
     // Soft stop only: allow a later restart/spawn. Never clear flags on shutdown.

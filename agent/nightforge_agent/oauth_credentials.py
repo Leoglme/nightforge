@@ -115,10 +115,15 @@ def is_rate_limited() -> bool:
 
 def _mark_rate_limited(seconds: float = RATE_LIMIT_BACKOFF_SECONDS) -> None:
     global _usage_backoff_until, _refresh_backoff_until
-    until = time.monotonic() + seconds
+    now = time.monotonic()
+    already_backing_off = now < _usage_backoff_until
+    until = now + seconds
     _usage_backoff_until = max(_usage_backoff_until, until)
     _refresh_backoff_until = max(_refresh_backoff_until, until)
-    logger.warning("Claude OAuth API rate-limited — backing off for %.0fs", seconds)
+    # Avoid log spam when several callers hit 429 during the same backoff window
+    # (duplicate agent processes used to print this every few seconds).
+    if not already_backing_off:
+        logger.warning("Claude OAuth API rate-limited — backing off for %.0fs", seconds)
 
 
 def write_oauth_block(oauth: dict[str, Any]) -> None:

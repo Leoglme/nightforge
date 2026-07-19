@@ -103,6 +103,10 @@ async def reissue_machine_token(
     db.commit()
     db.refresh(machine)
 
+    # Drop any live socket authenticated with the previous token so the desktop
+    # sidecar reconnects with the new agent.json instead of staying "half online".
+    await agent_hub.disconnect_agent(machine_id)
+
     return MachineCreated(**MachineResponse.model_validate(machine).model_dump(), agent_token=token)
 
 
@@ -131,6 +135,7 @@ async def delete_machine(
     if not machine:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
 
+    await agent_hub.disconnect_agent(machine_id)
     delete_machine_cascade(db, machine)
     db.commit()
 
