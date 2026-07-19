@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/nightforge-logo.svg" alt="NightForge" width="220" />
+  <img src="docs/images/nightforge-logo.png" alt="NightForge" width="170" />
 </p>
 
 <h1 align="center">NightForge</h1>
@@ -33,9 +33,13 @@ NightForge fait tourner **Claude Code** et **Cursor Agent** en autonomie sur tes
 |:---:|:---:|
 | ![File d'attente — carnet de prompts](docs/images/queue.png) | ![Composer — session de nuit](docs/images/composer.png) |
 
-| Lancement | Review de code |
+| Lancement |
+|:---:|
+| ![Lancement — exécution en direct](docs/images/run.png) |
+
+| Review — fichiers modifiés | Review — diff détaillé |
 |:---:|:---:|
-| ![Lancement — exécution en direct](docs/images/run.png) | ![Review — diff des fichiers modifiés](docs/images/code-review.png) |
+| ![Review — liste des fichiers modifiés](docs/images/code-review.png) | ![Review — diff ligne par ligne](docs/images/code-review-diff.png) |
 
 ## Fonctionnalités
 
@@ -77,7 +81,11 @@ Le **Composer** permet de construire une séquence multi-messages par projet, av
 
 ### Review de code intégrée
 
-Pendant et après chaque lancement, NightForge affiche les **fichiers modifiés** avec le décompte `+/-` lignes. Ouvre la feuille de review pour parcourir chaque diff — idéal pour valider le travail de l'IA avant de merger ou de push.
+Pendant et après chaque lancement, NightForge affiche les **fichiers modifiés** avec le décompte `+/-` lignes. Ouvre la feuille de review pour parcourir chaque diff ligne par ligne — idéal pour valider le travail de l'IA avant de merger ou de push.
+
+| Fichiers modifiés | Diff détaillé |
+|:---:|:---:|
+| ![Liste des fichiers modifiés lors d'un lancement](docs/images/code-review.png) | ![Diff ligne par ligne d'un fichier](docs/images/code-review-diff.png) |
 
 ### Contrôle à distance
 
