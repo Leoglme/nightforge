@@ -77,7 +77,7 @@
 
         <template v-else>
           <div
-            class="flex items-center justify-between gap-2 border-b border-[var(--app-line)] px-3 py-1.5 lg:px-4 lg:py-2"
+            class="flex items-center justify-between gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-1.5 lg:bg-transparent lg:px-4 lg:py-2"
           >
             <div class="min-w-0 flex-1">
               <div class="truncate text-sm leading-tight font-medium">{{ activeProject.name }}</div>
@@ -114,10 +114,14 @@
             </div>
           </div>
 
-          <div ref="threadEl" class="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-3 sm:space-y-6 lg:px-4 lg:py-4">
+          <div
+            ref="threadEl"
+            class="min-h-0 space-y-5 overflow-y-auto px-3 py-3 sm:space-y-6 lg:px-4 lg:py-4"
+            :class="activeMessages.length === 0 ? 'shrink-0 lg:min-h-0 lg:flex-1' : 'flex-1'"
+          >
             <div
               v-if="activeMessages.length === 0"
-              class="mx-auto max-w-md py-12 text-center text-sm text-[var(--app-ink-soft)]"
+              class="mx-auto max-w-md py-4 text-center text-sm text-[var(--app-ink-soft)] lg:py-12"
             >
               <p class="mb-1 font-medium text-[var(--app-ink)]">{{ t('compose.emptyTitle') }}</p>
               <p>{{ t('compose.emptyHint') }}</p>
@@ -142,7 +146,7 @@
           </div>
 
           <!-- Shared chat composer (same style as run page) -->
-          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 lg:px-4 lg:py-4">
+          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-2 lg:px-4 lg:py-4">
             <ChatComposer
               full-width
               :text="input"
@@ -360,7 +364,17 @@
             <UInput v-model="settingsForm.base_branch" class="w-full" />
           </UFormField>
           <div class="flex flex-col gap-2">
-            <UCheckbox v-model="settingsForm.push_to_main" label="Autoriser le push directement sur main" />
+            <UCheckbox v-model="settingsForm.allow_push" label="Autoriser le push automatique par l’IA" />
+            <AppCallout variant="info">
+              Désactivé = commits locaux uniquement. Tu pushes toi-même après review.
+            </AppCallout>
+          </div>
+          <div class="flex flex-col gap-2">
+            <UCheckbox
+              v-model="settingsForm.push_to_main"
+              label="Autoriser le push directement sur main"
+              :disabled="!settingsForm.allow_push"
+            />
             <AppCallout variant="info">
               Activé par défaut. Sinon NightForge crée une branche
               <code class="font-mono text-[0.7rem] text-[var(--app-ink)]">night/YYYY-MM-DD</code> à chaque run.
@@ -458,7 +472,13 @@ const showSettings = ref(false)
 const showLaunchSettings = ref(false)
 
 const settingsProject = ref<Project | null>(null)
-const settingsForm = reactive({ name: '', github_repo: '', base_branch: 'main', push_to_main: true })
+const settingsForm = reactive({
+  name: '',
+  github_repo: '',
+  base_branch: 'main',
+  allow_push: true,
+  push_to_main: true,
+})
 const pathByProject = ref<Record<number, Record<number, string>>>({})
 const sessionByProject = ref<Record<number, string | null>>({})
 const modelByProject = ref<Record<number, string | null>>({})
@@ -540,7 +560,8 @@ const composerHint = computed(() => {
   if (activeSessionId.value) {
     return t('compose.hintSession')
   }
-  return t('compose.hintAdd')
+  // Keep the controls row free of the « empiler » hint (mobile + desktop).
+  return null
 })
 
 const sessionPillLabel = computed(() =>
@@ -748,6 +769,7 @@ async function openSettings(project: Project): Promise<void> {
   settingsForm.name = project.name
   settingsForm.github_repo = project.github_repo
   settingsForm.base_branch = project.base_branch
+  settingsForm.allow_push = project.allow_push !== false
   settingsForm.push_to_main = project.push_to_main !== false
   pathInputs.value = Object.fromEntries(machines.value.map((machine) => [machine.id, '']))
   showSettings.value = true
@@ -771,6 +793,7 @@ async function saveSettings(): Promise<void> {
       name: settingsForm.name.trim(),
       github_repo: settingsForm.github_repo.trim(),
       base_branch: settingsForm.base_branch.trim() || 'main',
+      allow_push: settingsForm.allow_push,
       push_to_main: settingsForm.push_to_main,
     })
     const pathSaves = Object.entries(pathInputs.value)

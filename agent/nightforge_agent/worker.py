@@ -102,6 +102,17 @@ class Worker:
         """Start the WebSocket loop and the heartbeat loop concurrently."""
         await asyncio.gather(self._client.run_forever(), self._heartbeat_loop())
 
+    async def flush_quotas(self) -> None:
+        """
+        Push a final Claude + Cursor quota snapshot to the control-plane.
+
+        Used on shutdown so mobile/web keep the last known usage after the PC leaves.
+        """
+        try:
+            await self._tick()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Final quota flush failed: %s", exc)
+
     async def _heartbeat_loop(self) -> None:
         """Periodically report status and quota to the control-plane."""
         while True:
@@ -874,9 +885,15 @@ class Worker:
 
         base_branch = project.get("base_branch") or "main"
         push_to_main = bool(project.get("push_to_main", True))
+        allow_push = bool(project.get("allow_push", True))
         if push_to_main:
             branch = await git_manager.ensure_on_branch(cwd, base_branch)
-            await self._emit(run_id, "info", f"{name}: pushing on {branch} (no night branch)")
+            await self._emit(
+                run_id,
+                "info",
+                f"{name}: working on {branch}"
+                + (" (push enabled)" if allow_push else " (local commits only)"),
+            )
         else:
             branch = await git_manager.create_night_branch(cwd, base_branch)
             await self._emit(run_id, "info", f"{name}: on branch {branch}")
@@ -901,9 +918,15 @@ class Worker:
                 break
             did_work = True
 
-        if did_work:
+        if did_work and allow_push:
             await git_manager.push(cwd, branch)
             await self._emit(run_id, "info", f"{name}: pushed {branch}")
+        elif did_work:
+            await self._emit(
+                run_id,
+                "info",
+                f"{name}: commits left on {branch} (push auto désactivé — review manuelle)",
+            )
 
     @staticmethod
     def _commit_message(message: dict, ok: bool) -> str:

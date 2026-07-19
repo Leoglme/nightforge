@@ -87,6 +87,7 @@ async def create_project(
         github_repo=repo,
         base_branch=payload.base_branch,
         push_to_main=payload.push_to_main,
+        allow_push=payload.allow_push,
     )
     db.add(project)
     db.commit()

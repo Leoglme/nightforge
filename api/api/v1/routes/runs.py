@@ -400,6 +400,35 @@ async def stop_run(
     return run
 
 
+@router.delete("/{run_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_run(
+    run_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    Delete a finished run and its related data.
+
+    Args:
+        run_id: The run id.
+        current_user: The authenticated user.
+        db: Database session.
+
+    Raises:
+        HTTPException: If the run is not found or still active.
+    """
+    run = db.query(Run).filter(Run.id == run_id, Run.user_id == current_user.id).first()
+    if not run:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if run.status in ACTIVE_RUN_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Stop the run before deleting it",
+        )
+    db.delete(run)
+    db.commit()
+
+
 @router.get("/{run_id}/messages", response_model=List[RunMessageResponse])
 async def list_run_messages(
     run_id: int,

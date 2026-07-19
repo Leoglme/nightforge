@@ -52,6 +52,14 @@ export function stopRun(id: number): Promise<Run> {
 }
 
 /**
+ * Delete a finished run and its history.
+ * @param id - Run id.
+ */
+export function deleteRun(id: number): Promise<void> {
+  return api.delete(`/api/v1/runs/${id}`)
+}
+
+/**
  * List the events/log of a run, optionally only those newer than a given id.
  * @param id - Run id.
  * @param afterId - Only return events with an id strictly greater than this.

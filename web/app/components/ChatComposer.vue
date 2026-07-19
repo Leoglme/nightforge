@@ -94,7 +94,7 @@ const props = withDefaults(
     canSend: boolean
     loading?: boolean
     placeholder?: string
-    hint?: string
+    hint?: string | null
     showContinue?: boolean
     continueLabel?: string
     /** Skip max-width centering (Compose column already constrains width). */

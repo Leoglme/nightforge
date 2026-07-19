@@ -76,7 +76,17 @@
           <UInput v-model="editForm.base_branch" class="w-full" />
         </UFormField>
         <div class="flex flex-col gap-2">
-          <UCheckbox v-model="editForm.push_to_main" label="Autoriser le push directement sur main" />
+          <UCheckbox v-model="editForm.allow_push" label="Autoriser le push automatique par l’IA" />
+          <AppCallout variant="info">
+            Désactivé = commits locaux uniquement. Tu pushes toi-même après review.
+          </AppCallout>
+        </div>
+        <div class="flex flex-col gap-2">
+          <UCheckbox
+            v-model="editForm.push_to_main"
+            label="Autoriser le push directement sur main"
+            :disabled="!editForm.allow_push"
+          />
           <AppCallout variant="info">
             Activé par défaut. Sinon NightForge crée une branche
             <code class="font-mono text-[0.7rem] text-[var(--app-ink)]">night/YYYY-MM-DD</code> à chaque run.
@@ -171,6 +181,7 @@ const editForm = reactive({
   name: '',
   github_repo: '',
   base_branch: 'main',
+  allow_push: true,
   push_to_main: true,
 })
 
@@ -219,6 +230,7 @@ async function openEdit(project: Project): Promise<void> {
   editForm.name = project.name
   editForm.github_repo = project.github_repo
   editForm.base_branch = project.base_branch
+  editForm.allow_push = project.allow_push !== false
   editForm.push_to_main = project.push_to_main !== false
   pathInputs.value = Object.fromEntries(machines.value.map((machine) => [machine.id, '']))
   editing.value = true
@@ -251,6 +263,7 @@ async function saveEdit(): Promise<void> {
       name: editForm.name.trim(),
       github_repo: editForm.github_repo.trim(),
       base_branch: editForm.base_branch.trim() || 'main',
+      allow_push: editForm.allow_push,
       push_to_main: editForm.push_to_main,
     })
     const pathSaves = Object.entries(pathInputs.value)

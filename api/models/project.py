@@ -28,6 +28,7 @@ class Project(Base):
         github_repo: Repo reference (owner/name or full URL).
         base_branch: Branch the night branch is created from (or push target).
         push_to_main: When True, work and push on ``base_branch`` (no ``night/…`` branch).
+        allow_push: When False, commit locally only — no ``git push`` (manual review).
         created_at: Creation timestamp.
     """
 
@@ -39,6 +40,7 @@ class Project(Base):
     github_repo: Mapped[str] = mapped_column(String(400), nullable=False)
     base_branch: Mapped[str] = mapped_column(String(120), default="main", nullable=False)
     push_to_main: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    allow_push: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=func.now(), nullable=True)
 

@@ -49,10 +49,22 @@
 
       <div class="flex flex-col gap-2">
         <div class="flex items-center justify-between gap-3">
+          <label class="text-sm font-medium text-[var(--app-ink)]" for="allow-push-switch">
+            Push automatique par l’IA
+          </label>
+          <USwitch id="allow-push-switch" v-model="form.allow_push" />
+        </div>
+        <AppCallout variant="info">
+          Désactivé = commits locaux uniquement. Tu pushes toi-même après review.
+        </AppCallout>
+      </div>
+
+      <div class="flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-3">
           <label class="text-sm font-medium text-[var(--app-ink)]" for="push-to-main-switch">
             Push directement sur main
           </label>
-          <USwitch id="push-to-main-switch" v-model="form.push_to_main" />
+          <USwitch id="push-to-main-switch" v-model="form.push_to_main" :disabled="!form.allow_push" />
         </div>
         <AppCallout variant="info">
           Activé par défaut. Sinon NightForge crée une branche
@@ -123,6 +135,7 @@ const probeError = ref('')
 const probeBlocked = ref(false)
 const form = reactive({
   local_path: '',
+  allow_push: true,
   push_to_main: true,
 })
 const preview = reactive({
@@ -157,6 +170,7 @@ watch(
   (open) => {
     if (open) {
       form.local_path = ''
+      form.allow_push = true
       form.push_to_main = true
       preview.name = ''
       preview.github_repo = ''
@@ -243,6 +257,7 @@ async function submit(): Promise<void> {
       name,
       github_repo: preview.github_repo.trim() || undefined,
       base_branch: preview.base_branch.trim() || 'main',
+      allow_push: form.allow_push,
       push_to_main: form.push_to_main,
     })
     await setProjectPath(project.id, {

@@ -77,7 +77,7 @@ app.include_router(api_router, prefix=settings.api_prefix)
 
 @app.on_event("startup")
 def _ensure_schema() -> None:
-    """Create missing tables/columns (e.g. ``projects.push_to_main``) on boot."""
+    """Create missing tables/columns (e.g. ``projects.allow_push``) on boot."""
     from core.database import init_db
 
     init_db()

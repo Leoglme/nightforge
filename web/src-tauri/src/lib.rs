@@ -227,8 +227,14 @@ fn stop_agent_sidecar_sync(state: &AgentProcess, mode: StopMode) {
 
     let child = state.child.lock().unwrap().take();
     if let Some(child) = child {
+        // Soft kill first so the agent can flush quotas (SIGTERM / kill without /F).
         let _ = child.kill();
-        thread::sleep(Duration::from_millis(800));
+        let grace = if mode == StopMode::Shutdown {
+            Duration::from_millis(2000)
+        } else {
+            Duration::from_millis(800)
+        };
+        thread::sleep(grace);
     }
 
     // Always kill the process tree on update/shutdown so orphans and children

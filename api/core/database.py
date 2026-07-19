@@ -101,6 +101,7 @@ def _ensure_optional_columns() -> None:
         ],
         "projects": [
             ("push_to_main", "BOOLEAN NOT NULL DEFAULT 1"),
+            ("allow_push", "BOOLEAN NOT NULL DEFAULT 1"),
         ],
         "cursor_accounts": [
             ("from_machine", "BOOLEAN NOT NULL DEFAULT 0"),

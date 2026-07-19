@@ -80,36 +80,19 @@
             <span>{{ t('runs.chat.faster') }}</span>
             <span>{{ t('runs.chat.smarter') }}</span>
           </div>
-          <div class="relative flex h-8 items-center px-1">
-            <div class="absolute inset-x-3 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-[var(--app-line)]" />
-            <div class="relative z-[1] flex w-full items-center justify-between">
-              <button
-                v-for="(opt, index) in effortOptions"
-                :key="opt.value"
-                type="button"
-                class="relative flex h-8 w-8 cursor-pointer items-center justify-center"
-                :aria-label="opt.label"
-                @click="selectEffort(opt.value)"
-              >
-                <span
-                  class="size-2 rounded-full transition-transform duration-150"
-                  :class="
-                    effort === opt.value
-                      ? 'scale-0'
-                      : index === effortOptions.length - 1
-                        ? 'bg-[var(--app-accent)]'
-                        : 'bg-[var(--app-ink-soft)]'
-                  "
-                />
-                <span
-                  v-if="effort === opt.value"
-                  class="absolute h-5 w-2.5 rounded-full bg-[var(--app-ink)] shadow-sm"
-                />
-              </button>
-            </div>
-          </div>
-          <div class="flex justify-between px-1 font-mono text-[0.6rem] text-[var(--app-ink-soft)]">
-            <span v-for="opt in effortOptions" :key="`lbl-${opt.value}`" class="w-8 text-center">
+          <USlider
+            :model-value="effortIndex"
+            :min="0"
+            :max="Math.max(effortOptions.length - 1, 0)"
+            :step="1"
+            color="neutral"
+            size="md"
+            class="px-1"
+            :aria-label="t('runs.chat.effort')"
+            @update:model-value="onEffortSlide"
+          />
+          <div class="flex justify-between px-0.5 font-mono text-[0.6rem] text-[var(--app-ink-soft)]">
+            <span v-for="opt in effortOptions" :key="`lbl-${opt.value}`" class="min-w-0 flex-1 text-center">
               {{ opt.short }}
             </span>
           </div>
@@ -183,6 +166,11 @@ const effortOptions = computed(() => {
   })
 })
 
+const effortIndex = computed(() => {
+  const idx = effortOptions.value.findIndex((opt) => opt.value === props.effort)
+  return idx >= 0 ? idx : Math.max(effortOptions.value.length - 1, 0)
+})
+
 const effortPillLabel = computed(() => {
   if (!props.effort) {
     return t('runs.chat.effort')
@@ -207,10 +195,14 @@ function selectModel(nextProvider: AiProvider, modelId: string): void {
 }
 
 /**
- * Pick an effort level.
+ * Drag/slide effort — keep the popover open (desktop + mobile).
  */
-function selectEffort(value: string): void {
-  emit('update:effort', value)
-  effortOpen.value = false
+function onEffortSlide(value: number | number[]): void {
+  const raw = Array.isArray(value) ? value[0] : value
+  const index = Math.round(Number(raw))
+  const opt = effortOptions.value[index]
+  if (opt) {
+    emit('update:effort', opt.value)
+  }
 }
 </script>

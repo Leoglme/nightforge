@@ -55,6 +55,7 @@ export interface Project {
   github_repo: string
   base_branch: string
   push_to_main?: boolean
+  allow_push?: boolean
   created_at: string
   pending_count: number
 }

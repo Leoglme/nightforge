@@ -82,6 +82,7 @@ def build_run_payload(db: Session, run: Run) -> dict:
                 "github_repo": project.github_repo,
                 "base_branch": project.base_branch,
                 "push_to_main": bool(getattr(project, "push_to_main", True)),
+                "allow_push": bool(getattr(project, "allow_push", True)),
                 "local_path": path.local_path if path else None,
                 "messages": [
                     {

@@ -29,14 +29,25 @@
           <div class="flex items-center gap-2">
             <StatusBadge :status="run.status" dot />
             <UButton
-              v-if="['SCHEDULED', 'RUNNING', 'WAITING_QUOTA'].includes(run.status)"
+              v-if="isActiveRun(run.status)"
               size="xs"
               color="error"
               variant="outline"
-              @click="stop(run.id)"
+              :loading="stoppingId === run.id"
+              @click.stop="stop(run.id)"
             >
               {{ t('common.stop') }}
             </UButton>
+            <UButton
+              v-else
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-trash-2"
+              :title="t('common.delete')"
+              :loading="deletingId === run.id"
+              @click.stop="remove(run.id)"
+            />
             <UButton
               size="xs"
               color="neutral"
@@ -53,10 +64,12 @@
 
 <script lang="ts" setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Machine, Run } from '~/types'
+import type { Machine, Run, RunStatus } from '~/types'
 import { formatDateTimeFr } from '~/utils/datetime'
 import { listMachines } from '~/services/machinesService'
-import { listRuns, stopRun } from '~/services/runsService'
+import { deleteRun, listRuns, stopRun } from '~/services/runsService'
+
+const ACTIVE_RUN_STATUSES: RunStatus[] = ['SCHEDULED', 'RUNNING', 'WAITING_QUOTA']
 
 /**
  * Runs list — nights and quick launches.
@@ -64,9 +77,16 @@ import { listRuns, stopRun } from '~/services/runsService'
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const { t } = useI18n()
+const toast = useToast()
 const runs = ref<Run[]>([])
 const machines = ref<Machine[]>([])
+const stoppingId = ref<number | null>(null)
+const deletingId = ref<number | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+
+function isActiveRun(status: RunStatus): boolean {
+  return ACTIVE_RUN_STATUSES.includes(status)
+}
 
 function machineLabel(machineId: number): string {
   return machines.value.find((m) => m.id === machineId)?.name ?? `#${machineId}`
@@ -77,8 +97,36 @@ async function refresh(): Promise<void> {
 }
 
 async function stop(id: number): Promise<void> {
-  await stopRun(id)
-  await refresh()
+  stoppingId.value = id
+  try {
+    await stopRun(id)
+    await refresh()
+  } catch (error) {
+    toast.add({
+      title: 'Impossible d’arrêter le lancement',
+      description: error instanceof Error ? error.message : undefined,
+      color: 'error',
+    })
+  } finally {
+    stoppingId.value = null
+  }
+}
+
+async function remove(id: number): Promise<void> {
+  deletingId.value = id
+  try {
+    await deleteRun(id)
+    runs.value = runs.value.filter((run) => run.id !== id)
+    toast.add({ title: 'Lancement supprimé', color: 'success' })
+  } catch (error) {
+    toast.add({
+      title: 'Impossible de supprimer le lancement',
+      description: error instanceof Error ? error.message : undefined,
+      color: 'error',
+    })
+  } finally {
+    deletingId.value = null
+  }
 }
 
 onMounted(async () => {

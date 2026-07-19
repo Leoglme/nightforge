@@ -82,7 +82,7 @@
       </div>
 
       <div v-else-if="!hasAnyUsage" class="py-6 text-center text-sm text-[var(--app-ink-soft)]">
-        Pas encore de lecture quota — ouvre l’app desktop, puis appuie sur actualiser
+        Pas encore de lecture quota — ouvre l’app desktop une fois pour synchroniser Claude/Cursor
         <template v-if="usage?.quota_auth_error || usageStore.error">
           <br />
           <span class="text-amber-600">{{ usage?.quota_auth_error || usageStore.error }}</span>
@@ -110,6 +110,9 @@
       </div>
 
       <div v-else class="flex flex-col gap-5">
+        <p v-if="usage?.source === 'snapshot' && usageSyncedLabel" class="text-xs text-[var(--app-ink-soft)]">
+          Dernière synchro (PC) · {{ usageSyncedLabel }}
+        </p>
         <div v-if="claudeBuckets.length">
           <div class="mb-3 flex items-start justify-between gap-3">
             <div class="flex min-w-0 items-center gap-3">
@@ -237,6 +240,18 @@ const cursorBuckets = computed((): UsageBucket[] =>
 )
 
 const hasAnyUsage = computed(() => Boolean(claudeBuckets.value.length || cursorBuckets.value.length))
+
+const usageSyncedLabel = computed(() => {
+  const stamps = [...claudeBuckets.value, ...cursorBuckets.value]
+    .map((b) => b.created_at)
+    .filter((v): v is string => Boolean(v))
+    .map((v) => parseApiDateTime(v).getTime())
+    .filter((t) => !Number.isNaN(t) && t > 0)
+  if (!stamps.length) {
+    return null
+  }
+  return formatDateTimeFr(new Date(Math.max(...stamps)))
+})
 
 const claudeResetLabel = computed(() => resetLabelForBuckets(claudeBuckets.value))
 

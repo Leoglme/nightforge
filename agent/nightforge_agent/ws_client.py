@@ -7,7 +7,7 @@ import asyncio
 import json
 import logging
 import ssl
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 import certifi
 import websockets
@@ -49,7 +49,8 @@ class WsClient:
         """
         self._config_provider = config_provider
         self._on_message = on_message
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
+        # websockets≥14: ClientConnection; keep Any for legacy/new API compatibility.
+        self._ws: Optional[Any] = None
         self._connected = asyncio.Event()
 
     async def send(self, message: dict) -> None:

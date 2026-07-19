@@ -1,5 +1,5 @@
 <template>
-  <UApp :locale="uiLocale">
+  <UApp :locale="uiLocale" :toaster="{ max: 1 }">
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>

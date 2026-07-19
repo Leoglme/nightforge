@@ -24,6 +24,7 @@ export function createProject(payload: {
   github_repo?: string
   base_branch?: string
   push_to_main?: boolean
+  allow_push?: boolean
 }): Promise<Project> {
   return api.post<Project>('/api/v1/projects', payload)
 }
