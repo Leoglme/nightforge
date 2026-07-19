@@ -199,6 +199,44 @@ def _norm_token(token: str) -> str:
     return (token or "").strip().replace("%3A%3A", "::")
 
 
+def _sync_live_machine_flags(
+    accounts: list[CursorAccount],
+    machine: Optional[MachineCursorUsage],
+    live_session_token: Optional[str] = None,
+) -> Optional[CursorAccount]:
+    """
+    Mark the vault row that matches the live IDE session; clear the flag on others.
+
+    Matching order: live email → live session token.
+    Also refreshes the matched row's session token when a live token is available.
+    """
+    machine_email = (machine.email or "").strip().lower() if machine else ""
+    live = _norm_token(live_session_token or "")
+    matched: Optional[CursorAccount] = None
+
+    for account in accounts:
+        is_live = False
+        if machine_email and (account.email or "").strip().lower() == machine_email:
+            is_live = True
+        elif live and account.session_token_encrypted:
+            try:
+                stored = encryption_service.decrypt(account.session_token_encrypted)
+            except Exception:  # noqa: BLE001
+                stored = ""
+            if _norm_token(stored) == live:
+                is_live = True
+
+        account.from_machine = is_live
+        if is_live:
+            matched = account
+            if live_session_token and live_session_token.strip():
+                account.session_token_encrypted = encryption_service.encrypt(
+                    live_session_token.strip()
+                )
+
+    return matched
+
+
 def _machine_already_imported(
     accounts: list[CursorAccount],
     machine: Optional[MachineCursorUsage],
@@ -206,37 +244,19 @@ def _machine_already_imported(
     live_session_token: Optional[str] = None,
 ) -> bool:
     """
-    True when the pinned machine session is already in the vault.
+    True when the pinned live IDE session is already in the vault.
 
-    Matching order: explicit ``from_machine`` flag → email → label → live token.
-    Side effect: sets ``from_machine`` on the matching row when found.
+    Matching order: live email → live session token.
+    Does not treat a stale ``from_machine`` flag on another account as a match.
     """
+    del online_machine_name  # kept for call-site compatibility
     if not accounts:
         return False
-
-    for account in accounts:
-        if bool(getattr(account, "from_machine", False)):
-            return True
 
     machine_email = (machine.email or "").strip().lower() if machine else ""
     if machine_email:
         for account in accounts:
             if (account.email or "").strip().lower() == machine_email:
-                account.from_machine = True
-                return True
-
-    for account in accounts:
-        label = (account.label or "").strip().lower()
-        if label.startswith("machine ·") or label.startswith("machine:"):
-            account.from_machine = True
-            return True
-
-    if online_machine_name:
-        needle = online_machine_name.strip().lower()
-        for account in accounts:
-            label = (account.label or "").strip().lower()
-            if needle and needle in label and "machine" in label:
-                account.from_machine = True
                 return True
 
     live = _norm_token(live_session_token or "")
@@ -249,7 +269,6 @@ def _machine_already_imported(
             except Exception:  # noqa: BLE001
                 continue
             if _norm_token(stored) == live:
-                account.from_machine = True
                 return True
 
     return False
@@ -286,7 +305,12 @@ def _upsert_machine_vault_row(
     email: Optional[str],
     machine_name: str,
 ) -> CursorAccount:
-    """Create or update the vault row that mirrors the live machine session."""
+    """
+    Create or update the vault row for the live machine session.
+
+    Matches by email (or label fallback) only — never rewrites another account
+    that still has a stale ``from_machine`` flag after an IDE account switch.
+    """
     label = (email or f"Machine · {machine_name}")[:120]
     existing: Optional[CursorAccount] = None
     if email:
@@ -295,21 +319,18 @@ def _upsert_machine_vault_row(
             .filter(CursorAccount.user_id == user_id, CursorAccount.email == email)
             .first()
         )
-    if existing is None:
-        existing = (
-            db.query(CursorAccount)
-            .filter(
-                CursorAccount.user_id == user_id,
-                CursorAccount.from_machine.is_(True),
-            )
-            .first()
-        )
-    if existing is None:
+    if existing is None and not email:
         existing = (
             db.query(CursorAccount)
             .filter(CursorAccount.user_id == user_id, CursorAccount.label == label)
             .first()
         )
+
+    # Clear stale machine flags so a previous IDE account stays in the vault list.
+    for other in (
+        db.query(CursorAccount).filter(CursorAccount.user_id == user_id).all()
+    ):
+        other.from_machine = False
 
     if existing:
         existing.session_token_encrypted = encryption_service.encrypt(token)
@@ -334,20 +355,23 @@ def _is_machine_mirror(
     account: CursorAccount,
     machine: Optional[MachineCursorUsage],
 ) -> bool:
-    """True when this vault row is the same identity as the pinned machine session."""
-    if bool(getattr(account, "from_machine", False)):
-        return True
+    """
+    True when this vault row is the live IDE session (visual hide only).
+
+    Uses live email identity — a stale ``from_machine`` flag must not hide
+    an account after the user switches Cursor IDE login.
+    """
     machine_email = (machine.email or "").strip().lower() if machine else ""
-    if machine_email and (account.email or "").strip().lower() == machine_email:
-        return True
-    return False
+    if not machine_email:
+        return False
+    return (account.email or "").strip().lower() == machine_email
 
 
 def _vault_display_accounts(
     accounts: list[CursorAccount],
     machine: Optional[MachineCursorUsage],
 ) -> list[CursorAccount]:
-    """Vault rows shown in UI — excludes the pinned machine mirror."""
+    """Vault rows shown in UI — hides only the live IDE account (by email)."""
     return [a for a in accounts if not _is_machine_mirror(a, machine)]
 
 
@@ -413,16 +437,18 @@ async def _overview_for_user(
             .all()
         )
         imported = True
-        # Best-effort usage fill for the new/updated row.
-        for account in accounts:
-            if account.from_machine and account.session_token_encrypted:
-                await _refresh_account(account)
-                break
+        # Best-effort usage fill for the live row.
+        live_row = _sync_live_machine_flags(accounts, machine, live_token)
+        if live_row and live_row.session_token_encrypted:
+            await _refresh_account(live_row)
         db.commit()
         for account in accounts:
             db.refresh(account)
-    elif imported:
+    else:
+        _sync_live_machine_flags(accounts, machine, live_token)
         db.commit()
+        for account in accounts:
+            db.refresh(account)
 
     pick = pick_best_account(
         [(a.id, a.auto_utilization, a.api_utilization) for a in accounts if a.is_active]
@@ -659,42 +685,13 @@ async def import_machine_session(
 
     token = str(resp["session_token"]).strip()
     email = resp.get("email") if isinstance(resp.get("email"), str) else email_from_token(token)
-    label = (email or f"Machine · {online.name}")[:120]
-
-    existing = None
-    if email:
-        existing = (
-            db.query(CursorAccount)
-            .filter(
-                CursorAccount.user_id == current_user.id,
-                CursorAccount.email == email,
-            )
-            .first()
-        )
-    if existing is None:
-        existing = (
-            db.query(CursorAccount)
-            .filter(
-                CursorAccount.user_id == current_user.id,
-                CursorAccount.label == label,
-            )
-            .first()
-        )
-    if existing:
-        existing.session_token_encrypted = encryption_service.encrypt(token)
-        if email:
-            existing.email = email
-        existing.from_machine = True
-        account = existing
-    else:
-        account = CursorAccount(
-            user_id=current_user.id,
-            label=label,
-            email=email,
-            session_token_encrypted=encryption_service.encrypt(token),
-            from_machine=True,
-        )
-        db.add(account)
+    account = _upsert_machine_vault_row(
+        db,
+        current_user.id,
+        token=token,
+        email=email,
+        machine_name=online.name,
+    )
 
     db.commit()
     db.refresh(account)

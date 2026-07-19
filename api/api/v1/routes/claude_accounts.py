@@ -241,6 +241,40 @@ def _norm_token(token: str) -> str:
     return (token or "").strip()
 
 
+def _sync_live_machine_flags(
+    accounts: list[ClaudeAccount],
+    machine: Optional[MachineClaudeUsage],
+    live_access_token: Optional[str] = None,
+    live_oauth: Optional[dict[str, Any]] = None,
+) -> Optional[ClaudeAccount]:
+    """
+    Mark the vault row that matches the live Claude session; clear others.
+
+    Matching order: live email → live access token.
+    Refreshes OAuth on the matched row when a live block is available.
+    """
+    machine_email = (machine.email or "").strip().lower() if machine else ""
+    live = _norm_token(live_access_token or "")
+    matched: Optional[ClaudeAccount] = None
+
+    for account in accounts:
+        is_live = False
+        if machine_email and (account.email or "").strip().lower() == machine_email:
+            is_live = True
+        elif live:
+            token = _access_token_from_account(account)
+            if token and _norm_token(token) == live:
+                is_live = True
+
+        account.from_machine = is_live
+        if is_live:
+            matched = account
+            if live_oauth:
+                account.oauth_encrypted = _encrypt_oauth(live_oauth)
+
+    return matched
+
+
 def _machine_already_imported(
     accounts: list[ClaudeAccount],
     machine: Optional[MachineClaudeUsage],
@@ -248,37 +282,19 @@ def _machine_already_imported(
     live_access_token: Optional[str] = None,
 ) -> bool:
     """
-    True when the pinned machine session is already in the vault.
+    True when the pinned live Claude session is already in the vault.
 
-    Matching order: explicit ``from_machine`` flag → email → label → live access token.
-    Side effect: sets ``from_machine`` on the matching row when found.
+    Matching order: live email → live access token.
+    Does not treat a stale ``from_machine`` flag on another account as a match.
     """
+    del online_machine_name  # kept for call-site compatibility
     if not accounts:
         return False
-
-    for account in accounts:
-        if bool(getattr(account, "from_machine", False)):
-            return True
 
     machine_email = (machine.email or "").strip().lower() if machine else ""
     if machine_email:
         for account in accounts:
             if (account.email or "").strip().lower() == machine_email:
-                account.from_machine = True
-                return True
-
-    for account in accounts:
-        label = (account.label or "").strip().lower()
-        if label.startswith("machine ·") or label.startswith("machine:"):
-            account.from_machine = True
-            return True
-
-    if online_machine_name:
-        needle = online_machine_name.strip().lower()
-        for account in accounts:
-            label = (account.label or "").strip().lower()
-            if needle and needle in label and "machine" in label:
-                account.from_machine = True
                 return True
 
     live = _norm_token(live_access_token or "")
@@ -286,7 +302,6 @@ def _machine_already_imported(
         for account in accounts:
             token = _access_token_from_account(account)
             if token and _norm_token(token) == live:
-                account.from_machine = True
                 return True
 
     return False
@@ -321,7 +336,12 @@ def _upsert_machine_vault_row(
     email: Optional[str],
     machine_name: str,
 ) -> ClaudeAccount:
-    """Create or update the vault row that mirrors the live machine session."""
+    """
+    Create or update the vault row for the live machine session.
+
+    Matches by email (or label fallback) only — never rewrites another account
+    that still has a stale ``from_machine`` flag after a Claude login switch.
+    """
     label = (email or f"Machine · {machine_name}")[:120]
     existing: Optional[ClaudeAccount] = None
     if email:
@@ -330,18 +350,15 @@ def _upsert_machine_vault_row(
             .filter(ClaudeAccount.user_id == user_id, ClaudeAccount.email == email)
             .first()
         )
-    if existing is None:
-        existing = (
-            db.query(ClaudeAccount)
-            .filter(ClaudeAccount.user_id == user_id, ClaudeAccount.from_machine.is_(True))
-            .first()
-        )
-    if existing is None:
+    if existing is None and not email:
         existing = (
             db.query(ClaudeAccount)
             .filter(ClaudeAccount.user_id == user_id, ClaudeAccount.label == label)
             .first()
         )
+
+    for other in db.query(ClaudeAccount).filter(ClaudeAccount.user_id == user_id).all():
+        other.from_machine = False
 
     if existing:
         existing.oauth_encrypted = _encrypt_oauth(oauth)
@@ -363,19 +380,22 @@ def _upsert_machine_vault_row(
 
 
 def _is_machine_mirror(account: ClaudeAccount, machine: Optional[MachineClaudeUsage]) -> bool:
-    """True when this vault row is the same identity as the pinned machine session."""
-    if bool(getattr(account, "from_machine", False)):
-        return True
+    """
+    True when this vault row is the live Claude session (visual hide only).
+
+    Uses live email identity — a stale ``from_machine`` flag must not hide
+    an account after the user switches Claude login.
+    """
     machine_email = (machine.email or "").strip().lower() if machine else ""
-    if machine_email and (account.email or "").strip().lower() == machine_email:
-        return True
-    return False
+    if not machine_email:
+        return False
+    return (account.email or "").strip().lower() == machine_email
 
 
 def _vault_display_accounts(
     accounts: list[ClaudeAccount], machine: Optional[MachineClaudeUsage]
 ) -> list[ClaudeAccount]:
-    """Vault rows shown in UI — excludes the pinned machine mirror."""
+    """Vault rows shown in UI — hides only the live account (by email)."""
     return [a for a in accounts if not _is_machine_mirror(a, machine)]
 
 
@@ -442,15 +462,19 @@ async def _overview_for_user(
             .all()
         )
         imported = True
-        for account in accounts:
-            if account.from_machine and account.oauth_encrypted:
-                await _refresh_account(account)
-                break
+        live_row = _sync_live_machine_flags(
+            accounts, machine, live_token, live_oauth=live_oauth
+        )
+        if live_row and live_row.oauth_encrypted:
+            await _refresh_account(live_row)
         db.commit()
         for account in accounts:
             db.refresh(account)
-    elif imported:
+    else:
+        _sync_live_machine_flags(accounts, machine, live_token, live_oauth=live_oauth)
         db.commit()
+        for account in accounts:
+            db.refresh(account)
 
     pick = pick_best_claude_account(
         [
@@ -692,36 +716,13 @@ async def import_machine_session(
         )
 
     email = resp.get("email") if isinstance(resp.get("email"), str) else email_from_oauth(oauth)
-    label = (email or f"Machine · {online.name}")[:120]
-
-    existing = None
-    if email:
-        existing = (
-            db.query(ClaudeAccount)
-            .filter(ClaudeAccount.user_id == current_user.id, ClaudeAccount.email == email)
-            .first()
-        )
-    if existing is None:
-        existing = (
-            db.query(ClaudeAccount)
-            .filter(ClaudeAccount.user_id == current_user.id, ClaudeAccount.label == label)
-            .first()
-        )
-    if existing:
-        existing.oauth_encrypted = _encrypt_oauth(oauth)
-        if email:
-            existing.email = email
-        existing.from_machine = True
-        account = existing
-    else:
-        account = ClaudeAccount(
-            user_id=current_user.id,
-            label=label,
-            email=email,
-            oauth_encrypted=_encrypt_oauth(oauth),
-            from_machine=True,
-        )
-        db.add(account)
+    account = _upsert_machine_vault_row(
+        db,
+        current_user.id,
+        oauth=oauth,
+        email=email,
+        machine_name=online.name,
+    )
 
     db.commit()
     db.refresh(account)

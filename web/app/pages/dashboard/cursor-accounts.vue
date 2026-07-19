@@ -212,6 +212,7 @@ const bannerError = ref<string | null>(null)
 
 /**
  * Hide import once the live machine session is vaulted (API auto-syncs it).
+ * The live account is only hidden visually from the registered list (by email).
  */
 const showImportMachine = computed(() => {
   const data = overview.value
