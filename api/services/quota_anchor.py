@@ -5,16 +5,21 @@ Tries a live agent read first, then falls back to the latest stored snapshot.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Literal, Optional, Tuple
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from core.database import SessionLocal
 from enums.quota_bucket import QuotaBucket
 from models.machine import Machine
 from models.quota_snapshot import QuotaSnapshot
 from services.agent_hub import agent_hub
 from services.quota_planner import anchor_reset_at_from_snapshot, normalize_utilization
+
+logger = logging.getLogger(__name__)
 
 QuotaAnchorSource = Literal["live", "snapshot", "none"]
 
@@ -62,6 +67,41 @@ def _latest_snapshot(
     return _sanitize_anchor(reset_at, utilization)
 
 
+def _persist_live_snapshot(
+    machine_id: int,
+    bucket: str,
+    utilization: float,
+    resets_at: datetime,
+) -> None:
+    """
+    Persist a live reading in an isolated session.
+
+    Avoids committing on the caller's request session (which races with agent
+    ``quota`` inserts and can raise MySQL/MariaDB 1020).
+    """
+    db = SessionLocal()
+    try:
+        db.add(
+            QuotaSnapshot(
+                machine_id=machine_id,
+                bucket=bucket,
+                utilization=utilization,
+                resets_at=resets_at.replace(tzinfo=None),
+            )
+        )
+        db.commit()
+    except OperationalError as exc:
+        db.rollback()
+        # Concurrent agent ticks often collide on quota_snapshots — non-fatal.
+        logger.warning(
+            "Could not persist live quota snapshot for machine %s: %s",
+            machine_id,
+            exc,
+        )
+    finally:
+        db.close()
+
+
 async def _live_machine_quota(
     db: Session, machine_id: int, user_id: int, timeout: float
 ) -> tuple[Optional[datetime], Optional[float], Optional[str]]:
@@ -89,15 +129,12 @@ async def _live_machine_quota(
         return None, None, None
 
     if resets_at is not None:
-        db.add(
-            QuotaSnapshot(
-                machine_id=machine_id,
-                bucket=response.get("bucket", "five_hour"),
-                utilization=float(utilization or 0.0),
-                resets_at=resets_at.replace(tzinfo=None),
-            )
+        _persist_live_snapshot(
+            machine_id,
+            response.get("bucket", "five_hour"),
+            float(utilization or 0.0),
+            resets_at,
         )
-        db.commit()
 
     return resets_at, utilization, None
 

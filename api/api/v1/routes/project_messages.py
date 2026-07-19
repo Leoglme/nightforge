@@ -129,6 +129,9 @@ async def create_message(
         content=payload.content,
         claude_session_id=payload.claude_session_id,
         claude_model=payload.claude_model,
+        provider=payload.provider,
+        effort=payload.effort,
+        fast_mode=payload.fast_mode,
         source_item_ids=payload.source_item_ids,
         created_from=payload.created_from,
     )

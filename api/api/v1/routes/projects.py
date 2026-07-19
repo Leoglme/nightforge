@@ -16,6 +16,7 @@ from models.user import User
 from schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate, _slugify_name
 from schemas.project_path import ProjectPathResponse, ProjectPathSet
 from services.auth_service import get_current_active_user
+from services.project_cleanup import delete_project_cascade
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -85,6 +86,7 @@ async def create_project(
         name=payload.name,
         github_repo=repo,
         base_branch=payload.base_branch,
+        push_to_main=payload.push_to_main,
     )
     db.add(project)
     db.commit()
@@ -151,7 +153,7 @@ async def delete_project(
     db: Session = Depends(get_db),
 ) -> None:
     """
-    Delete a project and its queue.
+    Detach a project from NightForge (delete all related app data).
 
     Args:
         project_id: The project id.
@@ -159,7 +161,7 @@ async def delete_project(
         db: Database session.
     """
     project = _get_owned_project(db, project_id, current_user)
-    db.delete(project)
+    delete_project_cascade(db, project)
     db.commit()
 
 

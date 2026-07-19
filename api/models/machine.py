@@ -42,6 +42,7 @@ class Machine(Base):
     online: Mapped[bool] = mapped_column(default=False, nullable=False)
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
     claude_version: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
+    cursor_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     agent_version: Mapped[Optional[str]] = mapped_column(String(60), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 

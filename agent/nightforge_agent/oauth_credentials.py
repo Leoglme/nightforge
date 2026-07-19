@@ -5,11 +5,12 @@ NightForge keeps Claude sessions alive without manual terminal steps:
 - proactive refresh before expiry when a refresh token exists
 - backup of refresh tokens under ``~/.nightforge/oauth_backup.json``
 - automatic ``claude auth login`` (opens the browser) when repair is needed
-- optional ``apiKeyHelper`` wiring so Claude Code subprocesses reuse the same flow
+- per-subprocess OAuth injection when the NightForge agent spawns Claude Code
 """
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -98,6 +99,16 @@ def credentials_usable(oauth: Optional[dict[str, Any]]) -> bool:
     return bool(oauth and oauth.get("accessToken") and not token_expired(oauth))
 
 
+def current_access_token() -> Optional[str]:
+    """Return the current usable OAuth access token, if any."""
+    oauth = load_oauth_block_with_fallback()
+    if not credentials_usable(oauth):
+        return None
+    assert oauth is not None
+    token = oauth.get("accessToken")
+    return token if isinstance(token, str) and token else None
+
+
 def is_rate_limited() -> bool:
     return time.monotonic() < _usage_backoff_until
 
@@ -120,6 +131,92 @@ def write_oauth_block(oauth: dict[str, Any]) -> None:
     tmp = path.with_suffix(".credentials.json.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+
+def export_oauth_snapshot() -> Optional[dict[str, Any]]:
+    """
+    Read the raw ``.credentials.json`` file verbatim (whole payload, not just the OAuth block).
+
+    Used by :mod:`claude_login` to back up the machine's active account before a
+    ``claude auth login`` capture, so it can be restored byte-for-byte afterwards.
+
+    Returns:
+        The parsed JSON payload, or None if the file is missing/unreadable.
+    """
+    path = credentials_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.debug("Could not snapshot Claude credentials: %s", exc)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def restore_oauth_snapshot(snapshot: Optional[dict[str, Any]]) -> None:
+    """
+    Write a previously exported credentials snapshot back to disk verbatim.
+
+    Args:
+        snapshot: Payload from :func:`export_oauth_snapshot`. A None snapshot is a no-op
+            (we never delete a credentials file we didn't first observe).
+    """
+    if snapshot is None:
+        return
+    path = credentials_path()
+    try:
+        tmp = path.with_suffix(".credentials.json.tmp")
+        tmp.write_text(json.dumps(snapshot, indent=2), encoding="utf-8")
+        tmp.replace(path)
+    except OSError as exc:
+        logger.warning("Could not restore Claude credentials snapshot: %s", exc)
+
+
+def _jwt_claims(token: str) -> dict[str, Any]:
+    """Best-effort decode of a JWT payload segment (Claude tokens are usually opaque)."""
+    try:
+        segment = token.split(".")[1]
+        segment += "=" * (-len(segment) % 4)
+        return json.loads(base64.urlsafe_b64decode(segment))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def email_from_oauth(oauth: Optional[dict[str, Any]]) -> Optional[str]:
+    """
+    Best-effort email extraction from a Claude OAuth block.
+
+    The OAuth usage API does not return an email, so we check a few optional fields some
+    Claude Code versions store alongside the token, then fall back to JWT claims if the
+    access token happens to be a JWT.
+
+    Args:
+        oauth: The ``claudeAiOauth`` block.
+
+    Returns:
+        An email address if one could be inferred, else None.
+    """
+    if not isinstance(oauth, dict):
+        return None
+    for key in ("email", "accountEmail", "userEmail", "emailAddress"):
+        value = oauth.get(key)
+        if isinstance(value, str) and "@" in value:
+            return value.strip()
+    account = oauth.get("account")
+    if isinstance(account, dict):
+        for key in ("email", "emailAddress"):
+            value = account.get(key)
+            if isinstance(value, str) and "@" in value:
+                return value.strip()
+    token = oauth.get("accessToken")
+    if isinstance(token, str) and token.count(".") >= 2:
+        claims = _jwt_claims(token)
+        for key in ("email", "preferred_username"):
+            value = claims.get(key)
+            if isinstance(value, str) and "@" in value:
+                return value.strip()
+    return None
 
 
 def backup_oauth(oauth: dict[str, Any]) -> None:
@@ -293,18 +390,19 @@ def _spawn_claude_login() -> None:
     binary = shutil.which(claude_bin()) or claude_bin()
     logger.info("Opening browser to restore Claude session")
 
+    popen_kwargs: dict[str, Any] = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
     if sys.platform == "win32":
-        # ``start`` runs in the interactive user session so the default browser opens.
-        command = f'start "NightForge Claude" "{binary}" auth login --claudeai'
-        _login_process = subprocess.Popen(command, shell=True)
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
     else:
-        _login_process = subprocess.Popen(
-            [binary, "auth", "login", "--claudeai"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        popen_kwargs["start_new_session"] = True
+    _login_process = subprocess.Popen(
+        [binary, "auth", "login", "--claudeai"],
+        **popen_kwargs,
+    )
 
 
 async def wait_for_fresh_credentials(
@@ -357,6 +455,10 @@ async def repair_oauth_session() -> bool:
 async def ensure_valid_oauth(*, auto_repair: bool = True) -> Optional[dict[str, Any]]:
     """
     Return OAuth credentials with a valid access token, refreshing or repairing as needed.
+
+    Browser auto-repair only runs when there is nothing left to refresh (no refresh
+    token). A rate-limited refresh must not open a second login tab while Claude Code
+    already has a session on disk.
     """
     oauth = load_oauth_block_with_fallback()
 
@@ -368,14 +470,25 @@ async def ensure_valid_oauth(*, auto_repair: bool = True) -> Optional[dict[str, 
                 return refreshed
         return oauth
 
-    if oauth and str(oauth.get("refreshToken") or "").strip():
-        refreshed = await refresh_oauth_token(oauth)
+    has_refresh = bool(oauth and str(oauth.get("refreshToken") or "").strip())
+    if has_refresh:
+        refreshed = await refresh_oauth_token(oauth)  # type: ignore[arg-type]
         if credentials_usable(refreshed):
             return refreshed
+        # Keep a present access token even if expired — better than wiping / re-login.
+        if oauth and str(oauth.get("accessToken") or "").strip():
+            if not auto_repair:
+                return oauth
+            # Refresh failed (often 429) — do NOT open the browser; Claude Code session exists.
+            logger.warning(
+                "Claude OAuth refresh failed; keeping local access token without browser repair"
+            )
+            return oauth
 
     if not auto_repair:
         return None
 
+    # Truly logged out (no refresh token) — only then open ``claude auth login``.
     if await repair_oauth_session():
         return load_oauth_block_with_fallback()
     return None

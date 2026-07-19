@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RunCreate(BaseModel):
-    """Schema for scheduling a night run."""
+    """Schema for scheduling a night run (or an on-the-fly queue launch)."""
 
     machine_id: int = Field(...)
     project_ids: List[int] = Field(..., min_length=1)
@@ -24,6 +24,13 @@ class RunCreate(BaseModel):
         default=True,
         description="Wait for the next bucket reset before the first Claude prompt when the current bucket is in use",
     )
+    queue_item_ids: Optional[List[int]] = Field(
+        default=None,
+        description=(
+            "When set, snapshot only these queue items as run messages "
+            "(on-the-fly launch from the queue page) instead of project_messages / all pending."
+        ),
+    )
 
 
 class RunAddQuotas(BaseModel):
@@ -38,6 +45,7 @@ class RunResponse(BaseModel):
     id: int
     machine_id: int
     status: str
+    kind: str = "night"
     quota_count: int
     parallel: bool
     planned_timeline: Optional[dict] = None

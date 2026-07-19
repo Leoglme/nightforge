@@ -10,7 +10,7 @@ are snapshotted into :class:`RunMessage` rows for execution.
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -28,7 +28,12 @@ class ProjectMessage(Base):
         id: Unique identifier.
         project_id: Owning project.
         order_index: Position in the night sequence (lower runs first).
-        content: The final text sent to Claude Code.
+        content: The final text sent to the provider CLI.
+        claude_session_id: Optional session to resume (Claude).
+        claude_model: Model alias for the chosen provider.
+        provider: ``claude`` or ``cursor``.
+        effort: Effort / thinking level when supported.
+        fast_mode: Fast variant when supported.
         source_item_ids: Queue item ids this message was assembled from (JSON list), if any.
         created_from: Origin device (web/desktop/mobile).
     """
@@ -40,7 +45,10 @@ class ProjectMessage(Base):
     order_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     claude_session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    claude_model: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    claude_model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    effort: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    fast_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     source_item_ids: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
     created_from: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)

@@ -33,6 +33,7 @@ CLAUDE_USER_AGENT = oauth_credentials.CLAUDE_USER_AGENT
 _CACHE_TTL_SECONDS = 60
 _cache_expires_at = 0.0
 _cache_reading: Optional["QuotaReading"] = None
+_cache_readings: Optional[list["QuotaReading"]] = None
 _repair_task: Optional[asyncio.Task] = None
 
 
@@ -61,10 +62,122 @@ def _credentials_path() -> Path:
     return _claude_config_dir() / ".credentials.json"
 
 
-def _normalize_utilization(value: float) -> float:
+def _normalize_utilization(value: float, *, from_percent: bool = False) -> float:
+    """
+    Normalize a raw utilization / percent to a 0.0 → 1.0 fraction.
+
+    Anthropic's OAuth ``percent`` field is 0–100 (so ``1`` means 1 %, not 100 %).
+    Legacy ``utilization`` fields are already 0–1 (or occasionally 0–100).
+    """
+    if from_percent:
+        return min(max(float(value) / 100.0, 0.0), 1.0)
     if value > 1.0:
         return min(value / 100.0, 1.0)
-    return min(max(value, 0.0), 1.0)
+    return min(max(float(value), 0.0), 1.0)
+
+
+def _utilization_from_entry(entry: dict[str, Any]) -> Optional[float]:
+    """Pick utilization from a limit / bucket dict, preferring ``percent`` (0–100)."""
+    if "percent" in entry and isinstance(entry.get("percent"), (int, float)):
+        return _normalize_utilization(float(entry["percent"]), from_percent=True)
+    for key in ("utilization", "used_percentage"):
+        raw = entry.get(key)
+        if isinstance(raw, (int, float)):
+            return _normalize_utilization(float(raw), from_percent=False)
+    return None
+
+
+_KIND_TO_BUCKET = {
+    "session": "five_hour",
+    "five_hour": "five_hour",
+    "five-hour": "five_hour",
+    "weekly": "seven_day",
+    "weekly_all": "seven_day",
+    "seven_day": "seven_day",
+    "seven-day": "seven_day",
+    "week": "seven_day",
+    "weekly_opus": "seven_day_opus",
+    "seven_day_opus": "seven_day_opus",
+    "opus": "seven_day_opus",
+    "oauth": "seven_day_oauth_apps",
+    "oauth_apps": "seven_day_oauth_apps",
+    "seven_day_oauth_apps": "seven_day_oauth_apps",
+    "weekly_oauth_apps": "seven_day_oauth_apps",
+}
+
+
+def _bucket_from_limit_entry(entry: dict[str, Any]) -> Optional[str]:
+    """
+    Map a Claude ``limits[]`` entry to an internal bucket key.
+
+    ``weekly_scoped`` (e.g. Fable / legacy Opus) is stored as ``seven_day_opus`` so
+    existing columns and APIs keep working without a migration.
+    """
+    kind = str(entry.get("kind") or entry.get("type") or entry.get("name") or "").lower()
+    if kind == "weekly_scoped":
+        return "seven_day_opus"
+    return _KIND_TO_BUCKET.get(kind)
+
+
+def _parse_all_buckets(payload: dict[str, Any]) -> list[QuotaReading]:
+    """
+    Extract every known Claude Max bucket from an OAuth usage payload.
+
+    Supports ``limits[]`` (kind/percent) and legacy flat keys.
+    """
+    found: dict[str, QuotaReading] = {}
+
+    limits = payload.get("limits")
+    if isinstance(limits, list):
+        for entry in limits:
+            if not isinstance(entry, dict):
+                continue
+            bucket = _bucket_from_limit_entry(entry)
+            if not bucket:
+                continue
+            utilization = _utilization_from_entry(entry)
+            if utilization is None:
+                continue
+            found[bucket] = QuotaReading(
+                bucket=bucket,
+                utilization=utilization,
+                resets_at=_parse_resets_at(entry.get("resets_at")),
+            )
+
+    for flat_key, bucket in (
+        ("five_hour", "five_hour"),
+        ("seven_day", "seven_day"),
+        ("seven_day_opus", "seven_day_opus"),
+        ("seven_day_oauth_apps", "seven_day_oauth_apps"),
+    ):
+        if bucket in found:
+            continue
+        entry = payload.get(flat_key)
+        if not isinstance(entry, dict):
+            continue
+        utilization = _utilization_from_entry(entry)
+        if utilization is None:
+            continue
+        found[bucket] = QuotaReading(
+            bucket=bucket,
+            utilization=utilization,
+            resets_at=_parse_resets_at(entry.get("resets_at")),
+        )
+
+    return list(found.values())
+
+
+def _parse_five_hour_bucket(payload: dict[str, Any]) -> Optional[QuotaReading]:
+    """
+    Extract the rolling 5-hour session bucket from an OAuth usage payload.
+
+    Supports the newer ``limits[]`` shape (``kind: session``) and the legacy
+    flat ``five_hour`` key.
+    """
+    for reading in _parse_all_buckets(payload):
+        if reading.bucket == "five_hour":
+            return reading
+    return None
 
 
 def _parse_event_timestamp(raw: Optional[str]) -> Optional[datetime]:
@@ -100,50 +213,6 @@ def _parse_resets_at(raw: Any) -> Optional[datetime]:
     return None
 
 
-def _parse_five_hour_bucket(payload: dict[str, Any]) -> Optional[QuotaReading]:
-    """
-    Extract the rolling 5-hour session bucket from an OAuth usage payload.
-
-    Supports the newer ``limits[]`` shape (``kind: session``) and the legacy
-    flat ``five_hour`` key.
-    """
-    limits = payload.get("limits")
-    if isinstance(limits, list):
-        for entry in limits:
-            if not isinstance(entry, dict) or entry.get("kind") != "session":
-                continue
-            utilization = entry.get("percent")
-            if utilization is None:
-                utilization = entry.get("utilization")
-            if utilization is None:
-                utilization = entry.get("used_percentage")
-            if not isinstance(utilization, (int, float)):
-                continue
-            return QuotaReading(
-                bucket="five_hour",
-                utilization=_normalize_utilization(float(utilization)),
-                resets_at=_parse_resets_at(entry.get("resets_at")),
-            )
-
-    bucket = payload.get("five_hour")
-    if not isinstance(bucket, dict):
-        return None
-
-    utilization = bucket.get("utilization")
-    if utilization is None:
-        utilization = bucket.get("used_percentage")
-    if utilization is None:
-        utilization = bucket.get("percent")
-    if not isinstance(utilization, (int, float)):
-        return None
-
-    return QuotaReading(
-        bucket="five_hour",
-        utilization=_normalize_utilization(float(utilization)),
-        resets_at=_parse_resets_at(bucket.get("resets_at")),
-    )
-
-
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -174,7 +243,8 @@ async def _refresh_oauth_token(oauth: dict[str, Any]) -> Optional[dict[str, Any]
     return await oauth_credentials.refresh_oauth_token(oauth)
 
 
-async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
+async def _fetch_oauth_usage_payload(access_token: str) -> Optional[dict[str, Any]]:
+    """GET the raw OAuth usage JSON, or None on failure / rate-limit."""
     if oauth_credentials.is_rate_limited():
         return None
 
@@ -199,9 +269,70 @@ async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
         return None
 
     payload = response.json()
-    if not isinstance(payload, dict):
+    return payload if isinstance(payload, dict) else None
+
+
+async def _fetch_oauth_usage(access_token: str) -> Optional[QuotaReading]:
+    payload = await _fetch_oauth_usage_payload(access_token)
+    if payload is None:
         return None
     return _parse_five_hour_bucket(payload)
+
+
+async def _fetch_oauth_usage_all(access_token: str) -> list[QuotaReading]:
+    payload = await _fetch_oauth_usage_payload(access_token)
+    if payload is None:
+        return []
+    return _parse_all_buckets(payload)
+
+
+async def read_usage_for_access_token(access_token: str) -> list["QuotaReading"]:
+    """
+    Read every Claude Max bucket for an explicit OAuth access token.
+
+    Used for vaulted multi-accounts — unlike :func:`read_all_buckets`, this never touches
+    the local machine's ``.credentials.json`` and does no refresh/repair.
+
+    Args:
+        access_token: A vaulted account's OAuth access token.
+
+    Returns:
+        List of buckets (possibly empty on failure or rate-limit).
+    """
+    if not access_token:
+        return []
+    readings = await _fetch_oauth_usage_all(access_token)
+    return [_aware_utc(r) for r in readings]
+
+
+async def export_local_oauth() -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """
+    Export the local machine's active Claude OAuth block + best-effort email.
+
+    Returns any on-disk (or Credential Manager) block that has an ``accessToken``,
+    even if currently expired. A refresh is attempted when needed, but a refresh
+    failure (rate-limit, network) must not hide a real local Claude Code session —
+    callers may vault the token as-is. Only returns ``(None, None)`` when no
+    access token exists at all (then the UI may fall back to ``claude auth login``).
+
+    Returns:
+        ``(oauth_block, email)`` — either may be None when no session exists on disk.
+    """
+    oauth = oauth_credentials.load_oauth_block_with_fallback()
+    if not isinstance(oauth, dict) or not str(oauth.get("accessToken") or "").strip():
+        return None, None
+
+    needs_refresh = (
+        not oauth_credentials.credentials_usable(oauth)
+        or oauth_credentials.token_expires_soon(oauth)
+    )
+    if needs_refresh and str(oauth.get("refreshToken") or "").strip():
+        refreshed = await oauth_credentials.refresh_oauth_token(oauth)
+        if isinstance(refreshed, dict) and str(refreshed.get("accessToken") or "").strip():
+            oauth = refreshed
+
+    email = oauth_credentials.email_from_oauth(oauth)
+    return oauth, email
 
 
 async def _kickoff_repair_if_needed() -> bool:
@@ -358,9 +489,10 @@ def _scan_session_transcripts(max_age_hours: int = 24) -> Optional[QuotaReading]
 
 def invalidate_cache() -> None:
     """Drop the cached OAuth reading so the next poll fetches live data."""
-    global _cache_expires_at, _cache_reading
+    global _cache_expires_at, _cache_reading, _cache_readings
     _cache_expires_at = 0.0
     _cache_reading = None
+    _cache_readings = None
 
 
 async def ensure_oauth_fresh() -> bool:
@@ -374,6 +506,84 @@ async def ensure_oauth_fresh() -> bool:
     return oauth_credentials.credentials_usable(oauth)
 
 
+def _aware_utc(reading: QuotaReading) -> QuotaReading:
+    if reading.resets_at is not None and reading.resets_at.tzinfo is None:
+        return QuotaReading(
+            bucket=reading.bucket,
+            utilization=reading.utilization,
+            resets_at=reading.resets_at.astimezone(timezone.utc),
+            auth_error=reading.auth_error,
+        )
+    return reading
+
+
+async def read_all_buckets(last_reset_hint: Optional[datetime] = None) -> list[QuotaReading]:
+    """
+    Read every Claude Max bucket available from OAuth (5 h + weekly…).
+
+    Falls back to the five-hour transcript / CLI hint path when OAuth is empty.
+    """
+    global _cache_expires_at, _cache_reading, _cache_readings
+
+    now = time.monotonic()
+    if _cache_readings is not None and now < _cache_expires_at:
+        return list(_cache_readings)
+
+    oauth = await oauth_credentials.ensure_valid_oauth(auto_repair=False)
+    readings: list[QuotaReading] = []
+    auth_error: Optional[str] = None
+
+    if not oauth_credentials.credentials_usable(oauth):
+        repairing = await _kickoff_repair_if_needed()
+        auth_error = oauth_credentials.oauth_unavailable_reason(oauth, repairing=repairing)
+        five = QuotaReading(
+            bucket="five_hour",
+            utilization=0.0,
+            resets_at=None,
+            auth_error=auth_error,
+        )
+        _cache_reading = five
+        _cache_readings = [five]
+        _cache_expires_at = now + 15
+        return [five]
+
+    assert oauth is not None
+    readings = await _fetch_oauth_usage_all(oauth["accessToken"])
+    if not readings and oauth_credentials.token_expired(oauth):
+        refreshed = await _refresh_oauth_token(oauth)
+        if refreshed is not None:
+            readings = await _fetch_oauth_usage_all(refreshed["accessToken"])
+
+    readings = [_aware_utc(r) for r in readings]
+
+    five = next((r for r in readings if r.bucket == "five_hour"), None)
+    if five is None or (five.resets_at is None and five.utilization <= 0):
+        transcript = _scan_session_transcripts()
+        if transcript is not None:
+            five = _aware_utc(transcript)
+            readings = [r for r in readings if r.bucket != "five_hour"] + [five]
+    if five is None and last_reset_hint is not None:
+        hint = QuotaReading(bucket="five_hour", utilization=1.0, resets_at=last_reset_hint)
+        if _reading_is_actionable(hint):
+            five = _aware_utc(hint)
+            readings = [r for r in readings if r.bucket != "five_hour"] + [five]
+
+    actionable = [
+        r
+        for r in readings
+        if r.auth_error or _reading_is_actionable(r) or r.utilization >= 0
+    ]
+    # Keep zero-utilization buckets (user at 1% used → 99% remaining still useful).
+    if not actionable and five is not None:
+        actionable = [five]
+
+    five_out = next((r for r in actionable if r.bucket == "five_hour"), None)
+    _cache_reading = five_out
+    _cache_readings = actionable
+    _cache_expires_at = now + _CACHE_TTL_SECONDS
+    return list(actionable)
+
+
 async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional[QuotaReading]:
     """
     Read (or infer) the current five-hour quota bucket.
@@ -384,43 +594,8 @@ async def read_five_hour(last_reset_hint: Optional[datetime] = None) -> Optional
     Returns:
         A :class:`QuotaReading` when a real signal is available, else None.
     """
-    global _cache_expires_at, _cache_reading
-
-    now = time.monotonic()
-    if _cache_reading is not None and now < _cache_expires_at:
-        return _cache_reading
-
-    reading = await _read_oauth_usage()
-    if reading is not None and reading.auth_error and reading.resets_at is None:
-        _cache_reading = reading
-        _cache_expires_at = now + 15
-        return reading
-
-    if reading is None or (reading.resets_at is None and reading.utilization <= 0):
-        transcript = _scan_session_transcripts()
-        if transcript is not None:
-            reading = transcript
-    if reading is None and last_reset_hint is not None:
-        hint_reading = QuotaReading(bucket="five_hour", utilization=1.0, resets_at=last_reset_hint)
-        if _reading_is_actionable(hint_reading):
-            reading = hint_reading
-
-    if reading is not None:
-        # Normalize the reset to timezone-aware UTC. The OAuth path is already aware; the
-        # transcript / CLI-hint paths produce naive *local* datetimes, so interpret those as
-        # local before converting — otherwise the control-plane and UI show a shifted hour.
-        if reading.resets_at is not None and reading.resets_at.tzinfo is None:
-            reading = QuotaReading(
-                bucket=reading.bucket,
-                utilization=reading.utilization,
-                resets_at=reading.resets_at.astimezone(timezone.utc),
-                auth_error=reading.auth_error,
-            )
-        if not _reading_is_actionable(reading) and reading.auth_error is None:
-            reading = None
-
-    if reading is not None:
-        _cache_reading = reading
-        _cache_expires_at = now + _CACHE_TTL_SECONDS
-
-    return reading
+    readings = await read_all_buckets(last_reset_hint)
+    for reading in readings:
+        if reading.bucket == "five_hour":
+            return reading
+    return readings[0] if readings else None

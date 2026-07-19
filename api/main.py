@@ -75,6 +75,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 app.include_router(api_router, prefix=settings.api_prefix)
 
 
+@app.on_event("startup")
+def _ensure_schema() -> None:
+    """Create missing tables/columns (e.g. ``projects.push_to_main``) on boot."""
+    from core.database import init_db
+
+    init_db()
+
+
 @app.get("/", tags=["root"])
 async def root() -> dict:
     """

@@ -1,4 +1,4 @@
-import type { QueueItem } from '~/types'
+import type { AiProvider, QueueItem } from '~/types'
 import { api } from '~/services/api'
 
 /**
@@ -6,10 +6,35 @@ import { api } from '~/services/api'
  * @module services/queueService
  */
 
+export interface QueueItemPayload {
+  prompt: string
+  title?: string | null
+  provider?: AiProvider | string | null
+  model?: string | null
+  effort?: string | null
+  fast_mode?: boolean
+  priority?: number
+  created_from?: string
+}
+
+export interface IdeasExpandPayload {
+  ideas: string
+  machine_id?: number | null
+  prefer_provider?: 'cursor' | 'claude'
+}
+
+export interface IdeasExpandResult {
+  summary?: string | null
+  source: 'agent' | 'heuristic'
+  provider_used?: string | null
+  model_used?: string | null
+  items: QueueItem[]
+}
+
 /**
  * List a project's queue.
  * @param projectId - Project id.
- * @param includeDone - Include prompts already completed by Claude.
+ * @param includeDone - Include prompts already completed.
  * @returns The ordered queue items.
  */
 export function listQueue(projectId: number, includeDone = false): Promise<QueueItem[]> {
@@ -23,11 +48,33 @@ export function listQueue(projectId: number, includeDone = false): Promise<Queue
  * @param payload - Prompt payload.
  * @returns The created queue item.
  */
-export function addQueueItem(
-  projectId: number,
-  payload: { prompt: string; priority?: number; created_from?: string },
-): Promise<QueueItem> {
+export function addQueueItem(projectId: number, payload: QueueItemPayload): Promise<QueueItem> {
   return api.post<QueueItem>(`/api/v1/projects/${projectId}/queue`, payload)
+}
+
+/**
+ * Expand free-form ideas into queue prompts (agent or heuristic).
+ * @param projectId - Project id.
+ * @param payload - Ideas + optional machine.
+ * @returns Created items + expansion metadata.
+ */
+export function expandIdeas(projectId: number, payload: IdeasExpandPayload): Promise<IdeasExpandResult> {
+  return api.post<IdeasExpandResult>(`/api/v1/projects/${projectId}/queue/expand`, payload)
+}
+
+/**
+ * Update a queue item (prompt + metadata).
+ * @param projectId - Project id.
+ * @param itemId - Queue item id.
+ * @param payload - Fields to update.
+ * @returns The updated item.
+ */
+export function updateQueueItem(
+  projectId: number,
+  itemId: number,
+  payload: Partial<QueueItemPayload>,
+): Promise<QueueItem> {
+  return api.patch<QueueItem>(`/api/v1/projects/${projectId}/queue/${itemId}`, payload)
 }
 
 /**

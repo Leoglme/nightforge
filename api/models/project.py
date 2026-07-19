@@ -4,7 +4,7 @@ Project model — a GitHub repository with its own prompt queue.
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -26,7 +26,8 @@ class Project(Base):
         user_id: Owner.
         name: Display name.
         github_repo: Repo reference (owner/name or full URL).
-        base_branch: Branch the night branch is created from.
+        base_branch: Branch the night branch is created from (or push target).
+        push_to_main: When True, work and push on ``base_branch`` (no ``night/…`` branch).
         created_at: Creation timestamp.
     """
 
@@ -37,6 +38,7 @@ class Project(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     github_repo: Mapped[str] = mapped_column(String(400), nullable=False)
     base_branch: Mapped[str] = mapped_column(String(120), default="main", nullable=False)
+    push_to_main: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
     updated_at: Mapped[Optional[datetime]] = mapped_column(onupdate=func.now(), nullable=True)
 

@@ -6,6 +6,8 @@ from fastapi import APIRouter
 from .routes import (
     agent_ws,
     auth,
+    claude_accounts,
+    cursor_accounts,
     health,
     machines,
     project_messages,
@@ -25,4 +27,6 @@ router.include_router(queue.router)
 router.include_router(project_messages.router)
 router.include_router(runs.router)
 router.include_router(quota.router)
+router.include_router(cursor_accounts.router)
+router.include_router(claude_accounts.router)
 router.include_router(agent_ws.router)

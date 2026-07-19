@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from enums.queue_item_status import QueueItemStatus
 from enums.run_status import RunStatus
+from enums.run_kind import RunKind
 from models.machine import Machine
 from models.project import Project
 from models.project_machine_path import ProjectMachinePath
@@ -66,6 +67,9 @@ def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_i
                     content=draft.content,
                     claude_session_id=draft.claude_session_id,
                     claude_model=draft.claude_model,
+                    provider=draft.provider,
+                    effort=draft.effort,
+                    fast_mode=bool(draft.fast_mode),
                     source_item_ids=draft.source_item_ids,
                 )
             )
@@ -87,9 +91,72 @@ def _snapshot_project_messages_with_sessions(db: Session, run_id: int, project_i
                 project_id=project_id,
                 order_index=index,
                 content=item.prompt,
+                claude_model=item.model,
+                provider=item.provider,
+                effort=item.effort,
+                fast_mode=bool(item.fast_mode),
                 source_item_ids=[item.id],
             )
         )
+
+
+def _snapshot_queue_items(
+    db: Session,
+    run_id: int,
+    project_id: int,
+    queue_item_ids: list[int],
+) -> int:
+    """
+    Snapshot specific queue items (on-the-fly launch), preserving selection order.
+
+    Args:
+        db: Database session.
+        run_id: The run to attach messages to.
+        project_id: Expected project for the items.
+        queue_item_ids: Ordered queue item ids to run.
+
+    Returns:
+        Number of messages created.
+
+    Raises:
+        HTTPException: If an id is missing or belongs to another project.
+    """
+    if not queue_item_ids:
+        return 0
+
+    items = (
+        db.query(QueueItem)
+        .filter(QueueItem.id.in_(queue_item_ids), QueueItem.project_id == project_id)
+        .all()
+    )
+    by_id = {item.id: item for item in items}
+    missing = [item_id for item_id in queue_item_ids if item_id not in by_id]
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Queue item(s) introuvable(s) pour ce projet: {missing}",
+        )
+
+    count = 0
+    for index, item_id in enumerate(queue_item_ids):
+        item = by_id[item_id]
+        if item.status == QueueItemStatus.DONE.value:
+            continue
+        db.add(
+            RunMessage(
+                run_id=run_id,
+                project_id=project_id,
+                order_index=index,
+                content=item.prompt,
+                claude_model=item.model,
+                provider=item.provider,
+                effort=item.effort,
+                fast_mode=bool(item.fast_mode),
+                source_item_ids=[item.id],
+            )
+        )
+        count += 1
+    return count
 
 
 async def _rebuild_planned_timeline(db: Session, run: Run, user_id: int) -> None:
@@ -179,40 +246,89 @@ async def create_run(
     if len(projects) != len(set(payload.project_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project(s)")
 
-    anchor_reset_at, anchor_utilization = await _machine_quota_anchor(
-        db, payload.machine_id, current_user.id
-    )
-    plan = build_plan(
-        QuotaPlanRequest(
-            quota_count=payload.quota_count,
-            start_at=payload.scheduled_at,
-            wake_at=payload.window_end,
-            machine_id=payload.machine_id,
-            wait_for_fresh_quota=payload.wait_for_fresh_quota,
-        ),
-        anchor_reset_at=anchor_reset_at,
-        anchor_utilization=anchor_utilization,
-    )
+    items_by_id: dict[int, QueueItem] = {}
+    if payload.queue_item_ids is not None:
+        if not payload.queue_item_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Aucun prompt sélectionné à lancer",
+            )
+        queued = (
+            db.query(QueueItem)
+            .filter(
+                QueueItem.id.in_(payload.queue_item_ids),
+                QueueItem.project_id.in_(payload.project_ids),
+            )
+            .all()
+        )
+        items_by_id = {item.id: item for item in queued}
+        missing = [item_id for item_id in payload.queue_item_ids if item_id not in items_by_id]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Queue item(s) introuvable(s) pour ces projets: {missing}",
+            )
+
+    is_quick = payload.queue_item_ids is not None
+    planned_timeline = None
+    if not is_quick:
+        # Night runs need the Claude quota plan; quick launches skip it (Cursor/Claude
+        # execute immediately and avoid racing live snapshot inserts).
+        anchor_reset_at, anchor_utilization = await _machine_quota_anchor(
+            db, payload.machine_id, current_user.id
+        )
+        plan = build_plan(
+            QuotaPlanRequest(
+                quota_count=payload.quota_count,
+                start_at=payload.scheduled_at,
+                wake_at=payload.window_end,
+                machine_id=payload.machine_id,
+                wait_for_fresh_quota=payload.wait_for_fresh_quota,
+            ),
+            anchor_reset_at=anchor_reset_at,
+            anchor_utilization=anchor_utilization,
+        )
+        planned_timeline = plan.model_dump(mode="json")
 
     run = Run(
         user_id=current_user.id,
         machine_id=payload.machine_id,
         status=RunStatus.SCHEDULED.value,
+        kind=RunKind.QUICK.value if is_quick else RunKind.NIGHT.value,
         quota_count=payload.quota_count,
         parallel=payload.parallel,
-        planned_timeline=plan.model_dump(mode="json"),
+        planned_timeline=planned_timeline,
         scheduled_at=payload.scheduled_at,
         window_end=payload.window_end,
     )
     db.add(run)
     db.flush()
 
+    message_total = 0
     for index, project_id in enumerate(payload.project_ids):
         db.add(RunProject(run_id=run.id, project_id=project_id, order_index=index))
-        _snapshot_project_messages_with_sessions(db, run.id, project_id)
+        if payload.queue_item_ids is not None:
+            project_item_ids = [
+                item_id
+                for item_id in payload.queue_item_ids
+                if item_id in items_by_id and items_by_id[item_id].project_id == project_id
+            ]
+            message_total += _snapshot_queue_items(db, run.id, project_id, project_item_ids)
+        else:
+            _snapshot_project_messages_with_sessions(db, run.id, project_id)
+
+    if payload.queue_item_ids is not None and message_total == 0:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucun prompt sélectionné à lancer",
+        )
 
     db.commit()
     db.refresh(run)
+    # Ensure the dispatch query sees freshly committed run_messages (same session).
+    db.expire_all()
+    run = db.get(Run, run.id) or run
 
     # Dispatch now if it should start immediately and the agent is online. Otherwise it
     # stays SCHEDULED and is dispatched when the agent (re)connects.
@@ -414,6 +530,9 @@ async def add_run_message(
         content=payload.content.strip(),
         claude_session_id=payload.claude_session_id,
         claude_model=payload.claude_model,
+        provider=payload.provider,
+        effort=payload.effort,
+        fast_mode=bool(payload.fast_mode),
         status=QueueItemStatus.PENDING.value,
     )
     db.add(message)
@@ -507,6 +626,12 @@ async def retry_run_message(
         message.claude_session_id = payload.claude_session_id
     if payload.claude_model is not None:
         message.claude_model = payload.claude_model or None
+    if payload.provider is not None:
+        message.provider = payload.provider or None
+    if payload.effort is not None:
+        message.effort = payload.effort or None
+    if payload.fast_mode is not None:
+        message.fast_mode = payload.fast_mode
     message.status = QueueItemStatus.PENDING.value
     message.error = None
 

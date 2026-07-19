@@ -1,6 +1,6 @@
 <template>
   <aside
-    class="flex w-full shrink-0 flex-col border-b border-[var(--app-line)] bg-[var(--app-surface)] lg:w-52 lg:border-r lg:border-b-0"
+    class="flex h-full min-h-0 w-full shrink-0 flex-col border-b border-[var(--app-line)] bg-[var(--app-surface)] lg:w-52 lg:border-r lg:border-b-0"
   >
     <!-- Desktop header -->
     <div class="hidden items-center justify-between px-3 py-3 lg:flex">

@@ -1,4 +1,4 @@
-import type { LoginCredentials, TokenResponse, User } from '~/types'
+import type { LoginCredentials, SignupCredentials, TokenResponse, User } from '~/types'
 
 /**
  * Authentication service for user management.
@@ -29,6 +29,25 @@ export async function login(credentials: LoginCredentials): Promise<TokenRespons
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Login failed' }))
     throw new Error(error.detail || 'Échec de la connexion')
+  }
+  return response.json()
+}
+
+/**
+ * Register a new account.
+ * @param credentials - Signup credentials (name, email, password).
+ * @returns The token response for the freshly created account.
+ * @throws If registration fails.
+ */
+export async function register(credentials: SignupCredentials): Promise<TokenResponse> {
+  const response = await fetch(`${getApiUrl()}/api/v1/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(credentials),
+  })
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Registration failed' }))
+    throw new Error(error.detail || "Échec de l'inscription")
   }
   return response.json()
 }

@@ -1,15 +1,16 @@
 # NightForge — Architecture & Contexte
 
-> **Statut :** spec / conception. Aucun code écrit à ce stade.
+> **Statut :** V2 implémentée (multi-provider Claude + Cursor, carnet de prompts, lifecycle sidecar).
 > **Auteur du besoin :** Léo Guillaume (Dibodev).
-> **But de ce document :** figer tout ce qui a été compris et décidé pour retrouver le contexte plus tard et servir de source de vérité au moment d'implémenter.
-> **Dernière mise à jour :** 2026-07-11.
+> **But de ce document :** figer tout ce qui a été compris et décidé pour retrouver le contexte plus tard et servir de source de vérité.
+> **Dernière mise à jour :** 2026-07-18.
+> **Suivi V2 :** [`V2_PLAN.md`](./V2_PLAN.md).
 
 ---
 
 ## 1. En une phrase
 
-**NightForge** est un orchestrateur qui fait travailler **Claude Code de façon autonome pendant la nuit / mes absences**, en pilotant intelligemment le **quota Claude Max** (fenêtres de 5 h), en vidant une **file d'attente de prompts par projet**, sur la **machine de mon choix** (PC fixe ou portable), le tout pilotable **depuis n'importe quel appareil** (desktop ou téléphone) **sans VPN**.
+**NightForge** est un orchestrateur qui fait travailler **Claude Code et/ou Cursor Agent de façon autonome pendant la nuit / mes absences** (et sert aussi de **carnet de prompts** quand je suis devant le PC), en pilotant intelligemment le **quota Claude Max** (fenêtres de 5 h), en vidant une **file d'attente de prompts par projet**, sur la **machine de mon choix**, le tout pilotable **depuis n'importe quel appareil** **sans VPN**.
 
 ---
 
@@ -49,11 +50,21 @@ Un **projet = une référence de dépôt GitHub** (tous mes projets y sont) :
 
 Pas besoin d'« importer un dossier » manuellement : on référence un repo GitHub, l'agent s'occupe du clone/pull.
 
-### 3.3 File d'attente (queue) — la bibliothèque de prompts
+### 3.3 File d'attente (queue) — carnet de prompts
 
-Liste ordonnée de **prompts** rattachés à un projet. Chaque entrée : `{ id, prompt, priorité, statut }` (`pending → running → done / failed / skipped`). Éditable **en temps réel depuis desktop ET téléphone**.
+Liste ordonnée de **prompts** rattachés à un projet. Chaque entrée :
 
-La file sert de **bibliothèque d'idées réutilisables** : ce ne sont pas forcément tous les prompts qui partent en une nuit. L'utilisateur pioche dedans pour composer sa séquence.
+`{ id, prompt, title?, provider?, model?, effort?, fast_mode?, priorité, statut }`
+(`pending → running → done / failed / skipped`).
+
+- **Provider** : `claude` (Claude Code CLI) ou `cursor` (Cursor Agent CLI).
+- **Model / effort / fast** : optionnels ; préremplis avec les defaults quotidiens
+  (Sonnet→max, Opus→high, Fable→xhigh/Extra, Grok 4.5→high, Composer 2.5→pas d'effort / fast off).
+- Sert de **bibliothèque d'idées** : prise de notes pendant qu'un autre prompt tourne,
+  copier-coller manuel, ou lancement autonome via le Composer / un run.
+- Éditable **en temps réel depuis desktop ET téléphone**.
+
+La file n'est pas forcément exécutée en bloc : l'utilisateur pioche dedans pour composer sa séquence.
 
 ### 3.3 bis Messages de nuit (composer chat)
 
@@ -75,7 +86,8 @@ Interface type Claude :
 Une **machine** = un de mes PC (fixe / portable) faisant tourner l'**agent** NightForge. L'agent :
 - se connecte **en sortie** au control-plane (aucun port à ouvrir sur le PC) ;
 - s'annonce avec un nom (« Fixe », « Portable ») et un statut en ligne ;
-- reçoit les ordres, lance Claude Code **en local**, remonte logs + état.
+- reçoit les ordres, lance **Claude Code** et/ou **Cursor Agent** **en local**, remonte logs + état ;
+- **ne tourne que tant que l'app desktop Tauri est ouverte** (sidecar démarré au launch, `taskkill /T` à la fermeture — pas de service Windows, pas d'autostart).
 
 ### 3.5 Run (session de travail nocturne)
 
@@ -100,9 +112,11 @@ graph TD
   CP <-->|WebSocket sortant + token| AgentA["Agent — PC fixe"]
   CP <-->|WebSocket sortant + token| AgentB["Agent — PC portable"]
 
-  AgentA -->|spawn subprocess| ClaudeA["claude -p --resume<br/>(abonnement Max)"]
+  AgentA -->|spawn subprocess| ClaudeA["claude -p --model --effort<br/>(abonnement Max)"]
+  AgentA -->|spawn subprocess| CursorA["agent -p --force --trust<br/>(Cursor Agent CLI)"]
   AgentA -->|git commit/push| GH["GitHub"]
   ClaudeA --> RepoA["repo cloné en local"]
+  CursorA --> RepoA
 ```
 
 ### 4.1 Les 3 composants
@@ -110,7 +124,7 @@ graph TD
 | Composant | Où | Rôle | Techno |
 |-----------|----|------|--------|
 | **Control-plane** | VPS Debian OVH (Docker) | API REST + WebSocket, base de données (projets, files, runs, logs, machines), sert l'UI web pour le téléphone | **FastAPI + MariaDB** (mirroir de `devleadhunter/api`) |
-| **Agent** | Sur chaque PC (fixe + portable) | Connexion sortante au VPS, lance `claude` en local, surveille le quota, fait les commits/push Git, streame logs & état | **Python** (autostart, packagé en sidecar Tauri ou service) |
+| **Agent** | Sur chaque PC (fixe + portable) | Connexion sortante au VPS, lance `claude` / Cursor `agent` en local, surveille le quota Claude, fait les commits/push Git, streame logs & état | **Python** (sidecar Tauri uniquement — mort avec l'app) |
 | **UI (web + desktop)** | VPS (web) + chaque PC (desktop) | Même app Nuxt : dashboard, gestion projets/files, lancement de runs, planificateur de quotas | **Nuxt 4** (web) + **Tauri 2** (desktop, auto-updater signé) |
 
 > **Une seule UI Nuxt** écrite une fois → servie en **web** (téléphone / navigateur) et packagée en **desktop Tauri** (pointant `NUXT_PUBLIC_API_BASE` vers le VPS, exactement comme `devleadhunter`).
@@ -163,14 +177,24 @@ Exemples cibles (validés) :
 
 ---
 
-## 7. Communication avec Claude Code
+## 7. Communication avec Claude Code & Cursor
 
-**Décision : CLI headless (Option A).**
+### Claude Code (Option A — CLI headless)
 
-- `claude -p "<prompt>"` (mode print / headless), `--resume` pour reprendre une session coupée, `--dangerously-skip-permissions` pour l'autonomie nocturne.
-- **Mode abonnement Max obligatoire** : le `claude` de chaque PC doit être **connecté à mon compte Max**. **Ne JAMAIS** passer par `ANTHROPIC_API_KEY` → ça facturerait au token et contournerait l'abonnement (l'inverse du but).
-- Options B (automatiser Claude Desktop) et C (API/agent intermédiaire) **écartées** : fragiles ou hors-sujet quota.
-- Pré-requis machine : Claude Code installé + connecté ; l'agent se contente d'orchestrer les process.
+- `claude -p "<prompt>" --dangerously-skip-permissions` [`--model`] [`--effort`] [`--resume`].
+- **Mode abonnement Max obligatoire** : ne JAMAIS passer par `ANTHROPIC_API_KEY`.
+- Effort : `low` | `medium` | `high` | `xhigh` (Extra) | `max`.
+
+### Cursor Agent (CLI headless)
+
+- `agent -p --force --trust --approve-mcps --workspace <repo> [--model …] "<prompt>"`.
+- Binaire configurable via `NF_CURSOR_BIN` (défaut `agent` / `agent.cmd` sur Windows).
+- Fast / effort passés via la syntaxe params du `--model` quand applicable.
+- Les messages Cursor **ne consomment pas** le planner de quotas Claude Max.
+
+### Runs mixtes
+
+Un même run peut enchaîner des messages Claude et Cursor (choix par message via `provider`).
 
 ---
 
@@ -178,14 +202,14 @@ Exemples cibles (validés) :
 
 Avant chaque run (par projet) :
 - vérifier que le repo est propre (sinon stash / abort selon config) ;
-- `git pull` de la branche de base ;
-- créer une **branche dédiée** : `night/AAAA-MM-JJ` (ou `night/<projet>-AAAA-MM-JJ`).
+- si `push_to_main` : checkout de la branche de base (`main`…) et push dessus ;
+- sinon : créer une **branche dédiée** `night/AAAA-MM-JJ` depuis la branche de base.
 
 Pendant le travail :
 - **commits réguliers** (format conventional : `feat:`, `fix:`, `refactor:`…), après chaque prompt terminé ou par intervalle.
 
 À la fin :
-- **push automatique** de la branche sur GitHub ;
+- **push automatique** de la branche active sur GitHub ;
 - **résumé des changements** (liste des commits, prompts traités, échecs) disponible au réveil.
 
 ---
@@ -214,14 +238,14 @@ Sécurités : **error budget** (stop auto après N erreurs), **fin de fenêtre a
 | Table | Champs clés |
 |-------|-------------|
 | `users` | auth du dashboard (au moins moi ; pensé multi-user comme devleadhunter) |
-| `machines` | `id`, `name`, `user_id`, `last_seen_at`, `online`, `claude_version`, `agent_version` |
-| `projects` | `id`, `user_id`, `name`, `github_repo`, `base_branch` |
+| `machines` | `id`, `name`, `user_id`, `last_seen_at`, `online`, `claude_version`, `cursor_version`, `agent_version` |
+| `projects` | `id`, `user_id`, `name`, `github_repo`, `base_branch`, `push_to_main` |
 | `project_machine_paths` | `project_id`, `machine_id`, `local_path` |
-| `queue_items` | `id`, `project_id`, `prompt`, `priority`, `status`, `created_at`, `created_from` (web/desktop/mobile) — bibliothèque de prompts |
-| `project_messages` | `id`, `project_id`, `order_index`, `content`, `source_item_ids` (JSON), `created_from` — brouillons du compositeur chat |
+| `queue_items` | `id`, `project_id`, `prompt`, `title`, `provider`, `model`, `effort`, `fast_mode`, `priority`, `status`, `created_from` — carnet de prompts |
+| `project_messages` | `id`, `project_id`, `order_index`, `content`, `provider`, `claude_model`, `effort`, `fast_mode`, `claude_session_id`, `source_item_ids`, `created_from` |
 | `runs` | `id`, `machine_id`, `status`, `quota_count`, `started_at`, `window_end`, `planned_timeline` (JSON) |
 | `run_projects` | `run_id`, `project_id` (multi-projets) |
-| `run_messages` | `run_id`, `project_id`, `order_index`, `content`, `status`, `error` — snapshot exécuté |
+| `run_messages` | snapshot exécuté : content + provider/model/effort/fast + `status` / `error` |
 | `run_events` / `logs` | `run_id`, `ts`, `level`, `message` |
 | `quota_snapshots` | `machine_id`, `ts`, buckets `five_hour` / `seven_day` / `seven_day_opus`… (`utilization`, `resets_at`) |
 | `commits` | `run_id`, `project_id`, `sha`, `message`, `pushed_at` |
@@ -249,15 +273,15 @@ nightforge/
 | Realtime | **WebSocket** (FastAPI) | agents ↔ VPS ↔ UI (état/logs live) |
 | UI | **Nuxt 4**, Vue 3.5, **TypeScript strict**, Pinia, **Nuxt UI v4**, Tailwind v4, i18n, icônes **lucide** | drawers persistants (pile Pinia), palette Ctrl+K si pertinent |
 | Desktop | **Tauri 2** + `NUXT_DESKTOP_BUILD=1 nuxt generate`, **auto-updater signé** (minisign), CI Windows | `NUXT_PUBLIC_API_BASE` → VPS, version `0.1.${run_number}` |
-| Agent | **Python** (subprocess pour `claude` & `git`, httpx pour l'API usage, websockets) | **packagé en sidecar Tauri, lancé par l'app desktop au démarrage** (arrêté à la fermeture) ; réutilise le pattern worker de devleadhunter (boucle async `while True` + tick, `asyncio.create_task` au startup, session DB fraîche par tick, erreurs logguées sans casser la boucle) |
+| Agent | **Python** (subprocess pour `claude` / Cursor `agent` & `git`, httpx pour l'API usage, websockets) | **packagé en sidecar Tauri, lancé par l'app desktop au démarrage** (arrêté à la fermeture avec `taskkill /T`) ; tick idle 60 s / working 30 s |
 | Base | **MariaDB** (VPS) | cohérent avec mon ops actuel (> SQLite ; gratuit sur mon VPS) |
-| Qualité | husky + commitlint conventional, lint front (prettier + eslint + vue-tsc) | `STANDARDS_CODE_ET_ARCHITECTURE.md` à recréer |
+| Qualité | husky + commitlint conventional, lint front (prettier + eslint + vue-tsc) | [`STANDARDS_CODE_ET_ARCHITECTURE.md`](./STANDARDS_CODE_ET_ARCHITECTURE.md) |
 
 **Recommandations retenues :**
 - **DB = MariaDB** (reprend ton stack/ops ; SQLite possible mais MariaDB = zéro friction chez toi).
 - **Control-plane = FastAPI** (reprend `devleadhunter/api`).
 - **Agent = Python** ✅ **décidé** (même langage que l'API, subprocess/git triviaux, réutilise les workers existants de devleadhunter). Rust écarté : plus léger/natif Tauri mais non pratiqué → maintenance plus dure pour un gain marginal.
-- **Packaging agent = sidecar Tauri lancé par l'app desktop** ✅ **décidé** (un seul exécutable à lancer ; l'app démarre l'agent au lancement, le stoppe à la fermeture). L'app reste ouverte (barre des tâches).
+- **Packaging agent = sidecar Tauri lancé par l'app desktop** ✅ **décidé** (un seul exécutable ; mort avec l'app ; pas de service Windows).
 
 ---
 
@@ -289,17 +313,20 @@ Depuis le téléphone, sans VPN : gérer la bibliothèque de prompts, **composer
 
 ## 14. Décisions
 
-**Actées (2026-07-11) :**
+**Actées (2026-07-11 + V2 2026-07-18) :**
 
-1. ✅ **Langage de l'agent = Python** (cohérent avec l'API FastAPI, subprocess `claude`/`git` triviaux, réutilise les workers existants de devleadhunter). Rust écarté (non pratiqué).
-2. ✅ **Packaging de l'agent = sidecar Tauri lancé par l'app desktop** : un seul exécutable à lancer ; l'app démarre l'agent au lancement et l'arrête à la fermeture. L'app reste ouverte (barre des tâches). Pas de service séparé à installer.
+1. ✅ **Langage de l'agent = Python** (cohérent avec l'API FastAPI, subprocess `claude`/`agent`/`git` triviaux).
+2. ✅ **Packaging de l'agent = sidecar Tauri lancé par l'app desktop** : démarré au launch, **tué en arbre (`taskkill /F /T`) à la fermeture**, anti-respawn (`shutting_down`). Pas de service Windows / autostart.
+3. ✅ **Multi-provider** : Claude Code + Cursor Agent CLI, métadonnées par message, runs mixtes.
+4. ✅ **File d'attente = carnet de prompts** (prise de notes + lancement).
 
 **Encore ouvertes (à trancher au fil de l'implémentation, valeurs par défaut posées) :**
 
-3. **Parallélisme multi-projets** : séquentiel par défaut ; exposer une option parallèle ?
-4. **Réveil du PC en veille** (Windows Task Scheduler wake) vs « je laisse le PC allumé ». → défaut : PC allumé.
-5. **Nom de branche** : `night/AAAA-MM-JJ` global vs par projet.
-6. **Lecture du quota** : endpoint `.../usage` officieux — prévoir un fallback (parsing des messages de limite de Claude + transcripts locaux façon `ccusage`) si l'endpoint change.
+5. **Parallélisme multi-projets** : séquentiel par défaut ; exposer une option parallèle ?
+6. **Réveil du PC en veille** (Windows Task Scheduler wake) vs « je laisse le PC allumé ». → défaut : PC allumé.
+7. **Nom de branche** : `night/AAAA-MM-JJ` global vs par projet.
+8. **Lecture du quota** : endpoint `.../usage` officieux — prévoir un fallback.
+9. **Quota planner Cursor** : hors scope V2.
 
 ---
 

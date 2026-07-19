@@ -3,7 +3,7 @@
     <div :class="['flex items-center justify-between gap-2', compact ? 'mb-1.5' : 'mb-2']">
       <span class="app-label flex items-center gap-1.5">
         <UIcon name="i-lucide-history" class="text-[var(--app-accent)]" />
-        Session Claude existante
+        Session
       </span>
       <UIcon v-if="loading" name="i-lucide-loader-circle" class="animate-spin text-[var(--app-ink-soft)]" />
     </div>

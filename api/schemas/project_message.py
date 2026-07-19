@@ -12,7 +12,10 @@ class ProjectMessageCreate(BaseModel):
 
     content: str = Field(..., min_length=1)
     claude_session_id: Optional[str] = Field(default=None, max_length=64)
-    claude_model: Optional[str] = Field(default=None, max_length=32)
+    claude_model: Optional[str] = Field(default=None, max_length=64)
+    provider: Optional[str] = Field(default=None, max_length=20)
+    effort: Optional[str] = Field(default=None, max_length=16)
+    fast_mode: bool = Field(default=False)
     source_item_ids: Optional[List[int]] = Field(default=None)
     created_from: Optional[str] = Field(default=None, max_length=20)
 
@@ -22,7 +25,10 @@ class ProjectMessageUpdate(BaseModel):
 
     content: Optional[str] = Field(default=None, min_length=1)
     claude_session_id: Optional[str] = Field(default=None, max_length=64)
-    claude_model: Optional[str] = Field(default=None, max_length=32)
+    claude_model: Optional[str] = Field(default=None, max_length=64)
+    provider: Optional[str] = Field(default=None, max_length=20)
+    effort: Optional[str] = Field(default=None, max_length=16)
+    fast_mode: Optional[bool] = None
     source_item_ids: Optional[List[int]] = Field(default=None)
 
 
@@ -41,6 +47,9 @@ class ProjectMessageResponse(BaseModel):
     content: str
     claude_session_id: Optional[str] = None
     claude_model: Optional[str] = None
+    provider: Optional[str] = None
+    effort: Optional[str] = None
+    fast_mode: bool = False
     source_item_ids: Optional[List[int]] = None
     created_from: Optional[str] = None
     created_at: datetime

@@ -10,13 +10,93 @@
     "compose": "Compose",
     "queue": "Queue",
     "plan": "Planner",
-    "docs": "Guide",
-    "logout": "Log out"
+    "cursorAccounts": "Cursor accounts",
+    "logout": "Log out",
+    "back": "Back"
   },
   "login": {
     "title": "Sign in",
     "email": "Email",
     "password": "Password",
     "submit": "Sign in"
+  },
+  "common": {
+    "stop": "Stop",
+    "night": "Night",
+    "launch": "Launch",
+    "machine": "Machine",
+    "quotas": "Quotas",
+    "mode": "Mode",
+    "started": "Started",
+    "parallel": "Parallel",
+    "sequential": "Sequential",
+    "estimated": "estimated",
+    "real": "live",
+    "reset": "resets"
+  },
+  "status": {
+    "COMPLETED": "Completed",
+    "DONE": "Done",
+    "IDLE": "Idle",
+    "FAILED": "Failed",
+    "ERROR": "Error",
+    "STOPPED": "Stopped",
+    "RUNNING": "Running",
+    "WORKING": "Working",
+    "WAITING_QUOTA": "Waiting for quota",
+    "SCHEDULED": "Scheduled",
+    "PENDING": "Pending",
+    "SKIPPED": "Skipped",
+    "OFFLINE": "Offline",
+    "ONLINE": "Online"
+  },
+  "runs": {
+    "chat": {
+      "you": "You",
+      "claude": "Claude Code",
+      "cursor": "Cursor",
+      "retry": "Retry",
+      "waiting": "Waiting in queue…",
+      "thinking": "Working…",
+      "done": "Done.",
+      "failed": "Execution failed.",
+      "quotaPlan": "Quotas",
+      "freshAt": "fresh at",
+      "emptyTitle": "No messages yet",
+      "emptyHint": "Send a prompt below to start the conversation.",
+      "project": "Project",
+      "placeholder": "Describe a task or ask a question.",
+      "send": "Send",
+      "sent": "Message sent",
+      "sendFailed": "Could not send the message",
+      "effort": "Effort",
+      "effortTitle": "Effort {level}",
+      "faster": "Faster",
+      "smarter": "Smarter",
+      "fastMode": "Fast mode",
+      "enableFast": "Enable fast mode",
+      "effortLevels": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "High",
+        "xhigh": "Extra",
+        "max": "Max"
+      }
+    }
+  },
+  "compose": {
+    "messageN": "Message {n}",
+    "save": "Save",
+    "cancel": "Cancel",
+    "continue": "Go ahead continue",
+    "emptyTitle": "No messages for this project",
+    "emptyHint": "Write below or pick prompts from the library.",
+    "placeholder": "Write the next message…",
+    "placeholderContinue": "Optional — leave empty for « Go ahead, continue »",
+    "hintAdd": "Add to stack the next message",
+    "hintSession": "Session resume enabled",
+    "hintPicks": "{n} prompt(s) in draft",
+    "sessionNew": "Session",
+    "sessionShort": "{id}…"
   }
 }

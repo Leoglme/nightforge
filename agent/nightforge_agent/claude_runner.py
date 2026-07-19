@@ -56,14 +56,18 @@ _AUTH_MARKERS = (
 DEFAULT_CONTINUE_PROMPT = "Vas-y, continue là où tu t'étais arrêté."
 
 
-def claude_subprocess_env() -> dict[str, str]:
+def claude_subprocess_env(access_token: Optional[str] = None) -> dict[str, str]:
     """
-    Environment for Claude Code subprocesses.
+    Environment for Claude Code subprocesses spawned by the NightForge agent.
 
-    Strips static OAuth env vars so Claude uses NightForge's rotating apiKeyHelper instead.
+    Injects a fresh OAuth token when provided so Claude Code does not depend on a global
+    ``apiKeyHelper`` (which would run on every Cursor / Claude Code tab).
     """
     env = os.environ.copy()
-    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
+    if access_token:
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = access_token
+    else:
+        env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     return env
 
 
@@ -159,6 +163,8 @@ async def run_prompt(
     resume_session: Optional[str] = None,
     continue_session: bool = False,
     model: Optional[str] = None,
+    effort: Optional[str] = None,
+    access_token: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
     Run a prompt through Claude Code in headless mode, yielding output lines.
@@ -174,6 +180,8 @@ async def run_prompt(
         resume_session: Optional Claude session id to resume.
         continue_session: Resume the most recent conversation in ``cwd`` (``-c``).
         model: Optional model alias (fable, opus, sonnet, haiku).
+        effort: Optional effort level (low, medium, high, xhigh, max).
+        access_token: OAuth access token for this subprocess (NightForge agent only).
 
     Yields:
         Output lines, then a final sentinel line.
@@ -182,6 +190,8 @@ async def run_prompt(
     args = [claude_bin, "-p", prompt, "--dangerously-skip-permissions"]
     if model:
         args += ["--model", model]
+    if effort:
+        args += ["--effort", effort]
     if resume_session:
         args += ["--resume", resume_session]
     elif continue_session:
@@ -190,7 +200,7 @@ async def run_prompt(
     process = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
-        env=claude_subprocess_env(),
+        env=claude_subprocess_env(access_token),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

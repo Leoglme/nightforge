@@ -179,13 +179,6 @@
               </li>
               <li>Lance l'agent : <code class="app-inline-code">python -m nightforge_agent</code>.</li>
             </ol>
-            <NuxtLink
-              to="/dashboard/docs"
-              class="mt-3 inline-flex items-center gap-1 text-xs font-medium text-[var(--app-accent-ink)] hover:underline"
-            >
-              Guide d'installation complet
-              <UIcon name="i-lucide-arrow-right" class="h-3.5 w-3.5" />
-            </NuxtLink>
           </div>
         </template>
       </div>
@@ -498,7 +491,7 @@ onMounted(async () => {
     if (isDesktopApp.value) {
       desktopDiag.value = await getAgentStatus()
     }
-  }, 5000)
+  }, 12000)
 })
 
 onBeforeUnmount(() => {

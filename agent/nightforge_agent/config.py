@@ -31,7 +31,9 @@ class AgentConfig:
         api_base: Control-plane base URL (http/https).
         agent_token: Machine token used to authenticate the WebSocket.
         claude_bin: Path or name of the Claude Code CLI.
-        tick_seconds: Heartbeat / quota poll interval.
+        cursor_bin: Path or name of the Cursor Agent CLI.
+        tick_seconds: Heartbeat / quota poll interval while idle.
+        tick_seconds_working: Heartbeat interval while a run is active.
         quota_retry_seconds: Fallback wait before retrying after a quota hit with no reset hint.
         error_budget: Consecutive item failures tolerated before aborting a run.
     """
@@ -39,7 +41,9 @@ class AgentConfig:
     api_base: str
     agent_token: str
     claude_bin: str
+    cursor_bin: str
     tick_seconds: int
+    tick_seconds_working: int
     quota_retry_seconds: int
     error_budget: int
 
@@ -113,7 +117,10 @@ def try_load_config() -> Optional[AgentConfig]:
         api_base=api_base,
         agent_token=token,
         claude_bin=os.environ.get("NF_CLAUDE_BIN", "claude"),
-        tick_seconds=int(os.environ.get("NF_TICK_SECONDS", "30")),
+        cursor_bin=os.environ.get("NF_CURSOR_BIN", "agent"),
+        # Idle heartbeat every 60s; faster while a run is active.
+        tick_seconds=int(os.environ.get("NF_TICK_SECONDS", "60")),
+        tick_seconds_working=int(os.environ.get("NF_TICK_SECONDS_WORKING", "30")),
         quota_retry_seconds=int(os.environ.get("NF_QUOTA_RETRY_SECONDS", "900")),
         error_budget=int(os.environ.get("NF_ERROR_BUDGET", "3")),
     )

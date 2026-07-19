@@ -1,10 +1,10 @@
 """
-Queue item model — a single prompt in a project's queue.
+Queue item model — a single prompt in a project's library / waiting list.
 """
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -17,12 +17,17 @@ if TYPE_CHECKING:
 
 class QueueItem(Base):
     """
-    A prompt queued for a project, executed one by one.
+    A prompt queued for a project (library + optional overnight execution).
 
     Attributes:
         id: Unique identifier.
         project_id: Owning project.
-        prompt: The prompt text sent to Claude Code.
+        prompt: The prompt text.
+        title: Optional short label for the note list.
+        provider: ``claude`` or ``cursor`` (optional until chosen).
+        model: Model alias for the chosen provider.
+        effort: Effort / thinking level when supported.
+        fast_mode: Whether to use the fast variant (Cursor / some models).
         priority: Lower runs first.
         status: Lifecycle status.
         created_from: Origin device (web/desktop/mobile).
@@ -34,6 +39,11 @@ class QueueItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False, index=True)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    effort: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    fast_mode: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=100, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=QueueItemStatus.PENDING.value, nullable=False)
     created_from: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

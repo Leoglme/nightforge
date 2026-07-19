@@ -22,6 +22,7 @@ class MachineResponse(BaseModel):
     online: bool
     last_seen_at: Optional[datetime] = None
     claude_version: Optional[str] = None
+    cursor_version: Optional[str] = None
     agent_version: Optional[str] = None
     created_at: datetime
 

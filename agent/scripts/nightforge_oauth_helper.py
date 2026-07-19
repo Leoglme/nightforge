@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Claude Code apiKeyHelper — prints a fresh OAuth access token to stdout.
+Legacy Claude Code apiKeyHelper entry point.
 
-Configured automatically by the NightForge agent in ``~/.claude/settings.json``.
+NightForge no longer configures ``apiKeyHelper`` globally. The agent injects OAuth
+tokens per subprocess instead.
 """
 from __future__ import annotations
 

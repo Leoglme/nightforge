@@ -20,6 +20,7 @@ class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     github_repo: Optional[str] = Field(default=None, max_length=400)
     base_branch: str = Field(default="main", max_length=120)
+    push_to_main: bool = True
 
     @field_validator("github_repo", mode="before")
     @classmethod
@@ -37,6 +38,7 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     github_repo: Optional[str] = Field(None, min_length=1, max_length=400)
     base_branch: Optional[str] = Field(None, max_length=120)
+    push_to_main: Optional[bool] = None
 
 
 class ProjectResponse(BaseModel):
@@ -46,6 +48,7 @@ class ProjectResponse(BaseModel):
     name: str
     github_repo: str
     base_branch: str
+    push_to_main: bool = True
     created_at: datetime
     pending_count: int = 0
 

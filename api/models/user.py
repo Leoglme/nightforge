@@ -12,6 +12,8 @@ from core.database import Base
 from enums.user_role import UserRole
 
 if TYPE_CHECKING:
+    from models.claude_account import ClaudeAccount
+    from models.cursor_account import CursorAccount
     from models.machine import Machine
     from models.project import Project
     from models.run import Run
@@ -51,6 +53,12 @@ class User(Base):
     )
     runs: Mapped[list["Run"]] = relationship(
         "Run", back_populates="user", cascade="all, delete-orphan"
+    )
+    cursor_accounts: Mapped[list["CursorAccount"]] = relationship(
+        "CursorAccount", back_populates="user", cascade="all, delete-orphan"
+    )
+    claude_accounts: Mapped[list["ClaudeAccount"]] = relationship(
+        "ClaudeAccount", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:

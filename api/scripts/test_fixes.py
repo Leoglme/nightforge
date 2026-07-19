@@ -29,6 +29,7 @@ from models.run_project import RunProject
 from models.user import User
 from schemas.quota import QuotaPlanRequest
 from services.machine_cleanup import delete_machine_cascade
+from services.project_cleanup import delete_project_cascade
 from services.quota_anchor import resolve_machine_quota_anchor
 from services.quota_planner import build_plan, window_1_bounds
 
@@ -79,6 +80,53 @@ def test_machine_delete_cascade() -> None:
     assert db.query(RunEvent).count() == 0
     assert db.query(RunProject).count() == 0
     print("OK test_machine_delete_cascade")
+
+
+def test_project_delete_cascade() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+
+    user = User(email="t@example.com", name="Test", hashed_password="x", role="USER")
+    db.add(user)
+    db.flush()
+    project = Project(user_id=user.id, name="P", github_repo="x/y", base_branch="main")
+    db.add(project)
+    db.flush()
+    machine = Machine(user_id=user.id, name="PC", agent_token_hash="hash")
+    db.add(machine)
+    db.flush()
+    run = Run(
+        user_id=user.id,
+        machine_id=machine.id,
+        status=RunStatus.COMPLETED.value,
+        quota_count=1,
+        parallel=False,
+    )
+    db.add(run)
+    db.flush()
+    db.add(RunProject(run_id=run.id, project_id=project.id, order_index=0))
+    db.add(
+        RunMessage(
+            run_id=run.id,
+            project_id=project.id,
+            order_index=0,
+            content="go",
+            status=QueueItemStatus.DONE.value,
+        )
+    )
+    db.commit()
+
+    delete_project_cascade(db, project)
+    db.commit()
+
+    assert db.query(Project).count() == 0
+    assert db.query(RunProject).count() == 0
+    assert db.query(RunMessage).count() == 0
+    assert db.query(Run).count() == 1  # run itself kept; only project links removed
+    assert db.query(Machine).count() == 1
+    print("OK test_project_delete_cascade")
 
 
 def test_planner_stale_saturated_sets_auth_error() -> None:
@@ -144,6 +192,7 @@ async def test_quota_anchor_online_empty_no_stale_snapshot() -> None:
 
 if __name__ == "__main__":
     test_machine_delete_cascade()
+    test_project_delete_cascade()
     test_planner_stale_saturated_sets_auth_error()
     test_planner_future_reset_wait()
     asyncio.run(test_quota_anchor_online_empty_no_stale_snapshot())

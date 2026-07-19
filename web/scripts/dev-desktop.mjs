@@ -8,7 +8,20 @@
  * We use concurrently's programmatic API instead of an inline shell string because, on
  * Windows, cmd.exe mangles the nested quotes of `concurrently "cmd a" "cmd b"`.
  */
+import { spawnSync } from 'node:child_process'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import concurrently from 'concurrently'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+
+// Tauri refuses to compile without the externalBin file — create a stub if needed.
+const ensure = spawnSync(process.execPath, [join(__dirname, 'ensure-agent-sidecar.mjs')], {
+  stdio: 'inherit',
+})
+if (ensure.status !== 0) {
+  process.exit(ensure.status ?? 1)
+}
 
 const { result } = concurrently(
   [

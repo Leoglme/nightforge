@@ -11,16 +11,47 @@
     font-family: var(--app-font-ui);
   }
 
+  /* Hide native Edge/IE password reveal & clear controls — we ship our own
+     toggle in the password inputs; without this Edge shows a second eye icon. */
+  input::-ms-reveal,
+  input::-ms-clear {
+    display: none;
+  }
+
+  ::selection {
+    background-color: var(--app-ink);
+    color: var(--app-bg);
+  }
+
   button:not(:disabled),
   [role='button']:not([aria-disabled='true']),
+  [role='combobox']:not([aria-disabled='true']),
+  [role='option']:not([aria-disabled='true']),
+  [role='menuitem']:not([aria-disabled='true']),
   summary,
   label[for] {
     cursor: pointer;
   }
+
+  /* Kill focus rings only — keep default borders / shadows intact. */
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible,
+  select:focus,
+  select:focus-visible,
+  [role='combobox']:focus,
+  [role='combobox']:focus-visible {
+    outline: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-shadow: 0 0 #0000 !important;
+    --tw-ring-offset-width: 0px !important;
+    --tw-ring-width: 0px !important;
+  }
 }
 
 /* ============================================================
-   NightForge — "atelier de nuit" theme (light + dark)
+   NightForge — night forge theme (light + dark)
    Charbon neutre en dark (défaut), papier chaud en light.
    Tokens --app-* pilotent aussi les composants Nuxt UI (--ui-*).
    ============================================================ */
@@ -119,10 +150,95 @@ html.dark {
     background-color: var(--app-surface);
   }
 
+  /* — Action primitives (ink pills, B&W DA) — */
+  .app-btn-primary {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50;
+    background-color: var(--app-btn-bg);
+    color: var(--app-btn-text);
+    transition:
+      opacity 0.2s ease,
+      transform 0.2s ease;
+  }
+
+  .app-btn-primary:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+
+  .app-btn-secondary {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full border px-4 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-50;
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+    transition:
+      border-color 0.2s ease,
+      background-color 0.2s ease;
+  }
+
+  .app-btn-secondary:hover:not(:disabled) {
+    border-color: var(--app-ink-soft);
+    background-color: var(--app-surface-2);
+  }
+
+  .app-btn-danger {
+    @apply inline-flex h-9 min-h-9 cursor-pointer items-center justify-center gap-2 rounded-full px-4 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-50;
+    background-color: var(--app-red);
+    color: #fbf9f3;
+    transition: opacity 0.2s ease;
+  }
+
+  .app-btn-danger:hover:not(:disabled) {
+    opacity: 0.88;
+  }
+
+  .app-input {
+    @apply h-9 min-h-9 w-full rounded-lg border px-3 text-sm;
+    font-family: var(--app-font-ui);
+    border-color: var(--app-line);
+    background-color: var(--app-surface);
+    color: var(--app-ink);
+    transition:
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .app-input::placeholder {
+    color: var(--app-faint);
+  }
+
+  .app-input:hover {
+    border-color: var(--app-ink-soft);
+  }
+
+  .app-input:focus {
+    border-color: var(--app-ink);
+    box-shadow: none;
+    outline: none;
+  }
+
+  .app-input--error {
+    border-color: var(--app-red);
+  }
+
+  textarea.app-input {
+    @apply h-auto py-2;
+  }
+
   .app-label {
     @apply text-[0.66rem] font-medium tracking-[0.12em] uppercase;
     font-family: var(--app-font-mono);
     color: var(--app-ink-soft);
+  }
+
+  .app-brand-wordmark {
+    @apply text-[0.9375rem] font-semibold tracking-[-0.035em];
+    color: var(--app-ink);
+    line-height: 1.15;
+  }
+
+  .app-brand-wordmark__forge {
+    font-style: italic;
+    font-weight: 500;
+    color: var(--app-accent-ink);
   }
 
   .app-page-title {
@@ -156,11 +272,144 @@ html.dark {
     color: var(--app-blue);
   }
 
+  .app-callout {
+    @apply flex items-center gap-3 rounded-lg px-3.5 py-2.5;
+    border-left: 3px solid transparent;
+  }
+
+  .app-callout__icon {
+    @apply h-4 w-4 shrink-0;
+  }
+
+  .app-callout__body {
+    @apply min-w-0 text-xs leading-relaxed;
+    color: var(--app-ink-soft);
+  }
+
+  .app-callout--info {
+    background-color: var(--app-blue-soft);
+    border-left-color: var(--app-blue);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-blue) 22%, transparent);
+  }
+
+  .app-callout--info .app-callout__icon {
+    color: var(--app-blue);
+  }
+
+  .app-callout--warning {
+    background-color: var(--app-accent-soft);
+    border-left-color: var(--app-accent-ink);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-accent) 22%, transparent);
+  }
+
+  .app-callout--warning .app-callout__icon {
+    color: var(--app-accent-ink);
+  }
+
+  .app-callout--success {
+    background-color: var(--app-green-soft);
+    border-left-color: var(--app-green);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--app-green) 22%, transparent);
+  }
+
+  .app-callout--success .app-callout__icon {
+    color: var(--app-green);
+  }
+
+  .app-callout--neutral {
+    background-color: var(--app-surface-2);
+    border-left-color: var(--app-ink-soft);
+    box-shadow: inset 0 0 0 1px var(--app-line);
+  }
+
+  .app-callout--neutral .app-callout__icon {
+    color: var(--app-ink-soft);
+  }
+
+  .app-badge--engaged {
+    background-color: var(--app-violet-soft);
+    color: var(--app-violet);
+  }
+
+  /* Signal fort : encre pleine, lisible partout. */
+  .app-badge--strong {
+    background-color: var(--app-ink);
+    color: var(--app-bg);
+  }
+
   .app-inline-code {
     @apply rounded px-1 py-0.5 text-[0.8em];
     font-family: var(--app-font-mono);
     background-color: var(--app-surface);
     border: 1px solid var(--app-line);
     color: var(--app-ink);
+  }
+}
+
+/* Themed spinner (boot + inline loaders) */
+.loader-smooth {
+  width: 48px;
+  height: 48px;
+  border: 3px solid var(--app-line);
+  border-left-color: var(--app-accent);
+  border-radius: 50%;
+  animation: app-spin 0.8s linear infinite;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ============================================================
+   Auth pages — « l'affiche de nuit »
+   Staggered rise-in entrance + ceremonial slow spin for the
+   oversized brand mark on the poster panel.
+   ============================================================ */
+.auth-rise {
+  opacity: 0;
+  transform: translateY(18px);
+  animation: auth-rise 0.9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes auth-rise {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-spin-slow {
+  animation: auth-spin 90s linear infinite;
+}
+
+@keyframes auth-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Subtle noise grain overlay (pure CSS, no asset) */
+.app-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .auth-rise,
+  .auth-spin-slow,
+  .loader-smooth {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

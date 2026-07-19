@@ -1,10 +1,20 @@
 <template>
-  <div class="flex h-full flex-col">
+  <div class="flex min-h-0 flex-1 flex-col">
     <!-- Unified launch toolbar: config lives in the Réglages drawer so the chat fills the page -->
     <div
       class="flex shrink-0 flex-col gap-2 border-b border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-1.5 lg:flex-row lg:items-center lg:gap-3 lg:px-6 lg:py-3"
     >
       <div class="flex items-center gap-2">
+        <UButton
+          to="/dashboard"
+          color="primary"
+          icon="i-lucide-arrow-left"
+          class="hidden shrink-0 md:inline-flex"
+          size="sm"
+        >
+          {{ t('nav.back') }}
+        </UButton>
+
         <UButton
           color="neutral"
           variant="outline"
@@ -45,7 +55,7 @@
     </div>
 
     <!-- 3-column body -->
-    <div class="flex min-h-0 flex-1 flex-col lg:flex-row">
+    <div class="flex min-h-0 flex-1 flex-col lg:flex-row lg:items-stretch">
       <ComposerProjectList
         :projects="selectedProjects"
         :active-id="activeId"
@@ -55,7 +65,7 @@
       />
 
       <!-- Center: chat thread -->
-      <section class="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)]">
+      <section class="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[var(--app-bg)]">
         <div v-if="!activeProject" class="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <UIcon name="i-lucide-messages-square" class="text-3xl text-[var(--app-ink-soft)]" />
           <p class="max-w-sm text-sm text-[var(--app-ink-soft)]">
@@ -104,13 +114,13 @@
             </div>
           </div>
 
-          <div ref="threadEl" class="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-2 lg:space-y-4 lg:px-4 lg:py-4">
+          <div ref="threadEl" class="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-3 sm:space-y-6 lg:px-4 lg:py-4">
             <div
               v-if="activeMessages.length === 0"
-              class="mx-auto max-w-md rounded-xl border border-dashed border-[var(--app-line)] py-10 text-center text-sm text-[var(--app-ink-soft)]"
+              class="mx-auto max-w-md py-12 text-center text-sm text-[var(--app-ink-soft)]"
             >
-              <p class="mb-1 font-medium text-[var(--app-ink)]">Aucun message pour ce projet</p>
-              <p>Écris ci-dessous ou pioche des prompts dans la bibliothèque.</p>
+              <p class="mb-1 font-medium text-[var(--app-ink)]">{{ t('compose.emptyTitle') }}</p>
+              <p>{{ t('compose.emptyHint') }}</p>
             </div>
 
             <ComposerMessageBubble
@@ -131,63 +141,50 @@
             />
           </div>
 
-          <!-- Composer input (sticky bottom) -->
-          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] p-2 lg:p-4">
-            <button
-              type="button"
-              class="mb-2 flex w-full items-center gap-2 rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-surface)] lg:hidden"
-              @click="showMobileMessageSettings = true"
+          <!-- Shared chat composer (same style as run page) -->
+          <div class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 lg:px-4 lg:py-4">
+            <ChatComposer
+              full-width
+              :text="input"
+              :provider="activeProvider"
+              :model="activeModelId"
+              :effort="activeEffort"
+              :fast-mode="activeFastMode"
+              :can-send="canAddMessage"
+              :placeholder="composerPlaceholder"
+              :hint="composerHint"
+              :show-continue="Boolean(activeSessionId)"
+              :continue-label="t('compose.continue')"
+              @update:text="input = $event"
+              @update:provider="activeProvider = $event"
+              @update:model="activeModelId = $event"
+              @update:effort="activeEffort = $event"
+              @update:fast-mode="activeFastMode = $event"
+              @send="addMessage"
+              @continue="addContinueMessage"
             >
-              <UIcon name="i-lucide-settings-2" class="shrink-0 text-[var(--app-accent)]" />
-              <span class="min-w-0 flex-1 truncate text-xs text-[var(--app-ink)]">{{ mobileMessageOptionsLabel }}</span>
-              <UIcon name="i-lucide-chevron-right" class="shrink-0 text-[var(--app-ink-soft)]" />
-            </button>
-
-            <div class="mb-3 hidden gap-3 lg:grid lg:grid-cols-2">
-              <ComposerSessionPicker
-                v-model="activeSessionId"
-                :machine-id="machineId"
-                :local-path="activeLocalPath"
-                :offline="!selectedMachineOnline"
-              />
-              <ComposerModelPicker v-model="activeModelId" />
-            </div>
-
-            <UTextarea
-              v-model="input"
-              :rows="2"
-              autoresize
-              :placeholder="
-                activeSessionId
-                  ? 'Optionnel — laisse vide pour envoyer « Vas-y, continue » dans la session choisie'
-                  : 'Écris le prochain message pour Claude Code…'
-              "
-              class="mb-1.5 w-full lg:mb-2"
-            />
-            <div class="flex flex-wrap items-center justify-between gap-1.5 lg:gap-2">
-              <span v-if="pickedIds.length" class="text-xs text-[var(--app-ink-soft)]">
-                {{ pickedIds.length }} prompt(s) dans le brouillon
-              </span>
-              <span v-else-if="activeSessionId" class="text-xs text-[var(--app-accent-ink)]">
-                Reprise de session activée
-              </span>
-              <span v-else class="text-xs text-[var(--app-ink-soft)]">Ajoute pour empiler le message</span>
-              <div class="flex gap-2">
-                <UButton
-                  v-if="activeSessionId"
-                  size="sm"
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-play"
-                  @click="addContinueMessage"
-                >
-                  Vas-y continue
-                </UButton>
-                <UButton size="sm" color="primary" icon="i-lucide-send" :disabled="!canAddMessage" @click="addMessage">
-                  Ajouter
-                </UButton>
-              </div>
-            </div>
+              <template #controlsStart>
+                <UPopover v-model:open="sessionPopoverOpen" :ui="{ content: 'p-3 w-[min(20rem,calc(100vw-1.5rem))]' }">
+                  <button
+                    type="button"
+                    class="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-[var(--app-ink)] transition-colors hover:bg-[var(--app-surface-2)] sm:min-h-8"
+                    :class="activeSessionId ? 'text-[var(--app-accent-ink)]' : ''"
+                  >
+                    <UIcon name="i-lucide-history" class="h-3.5 w-3.5 shrink-0" />
+                    <span class="max-w-[7rem] truncate">{{ sessionPillLabel }}</span>
+                  </button>
+                  <template #content>
+                    <ComposerSessionPicker
+                      v-model="activeSessionId"
+                      compact
+                      :machine-id="machineId"
+                      :local-path="activeLocalPath"
+                      :offline="!selectedMachineOnline"
+                    />
+                  </template>
+                </UPopover>
+              </template>
+            </ChatComposer>
           </div>
         </template>
       </section>
@@ -239,30 +236,6 @@
           }
         "
       />
-    </AppDrawer>
-
-    <!-- Mobile session & model drawer -->
-    <AppDrawer
-      :open="showMobileMessageSettings"
-      title="Session & modèle"
-      :subtitle="activeProject?.name ?? undefined"
-      icon="i-lucide-settings-2"
-      @close="showMobileMessageSettings = false"
-    >
-      <div class="flex flex-col gap-4">
-        <ComposerSessionPicker
-          v-model="activeSessionId"
-          compact
-          :machine-id="machineId"
-          :local-path="activeLocalPath"
-          :offline="!selectedMachineOnline"
-        />
-        <ComposerModelPicker v-model="activeModelId" compact />
-      </div>
-
-      <template #footer>
-        <UButton color="primary" class="flex-1" @click="showMobileMessageSettings = false">Valider</UButton>
-      </template>
     </AppDrawer>
 
     <!-- Mobile launch settings drawer -->
@@ -357,64 +330,15 @@
     </AppDrawer>
 
     <!-- Create project drawer -->
-    <AppDrawer
+    <CreateProjectDrawer
       :open="showCreateProject"
-      title="Nouveau projet"
-      subtitle="Dépôt Git que Claude fera avancer"
-      icon="i-lucide-folder-plus"
+      :machine-id="machineId"
+      :machine-name="selectedMachineName"
       show-back
       @back="backToPicker"
       @close="showCreateProject = false"
-    >
-      <form id="create-project-form" class="flex flex-col gap-4" @submit.prevent="createNewProject">
-        <UFormField label="Nom">
-          <UInput v-model="createForm.name" class="w-full" size="lg" required placeholder="Mon projet" />
-        </UFormField>
-        <UFormField
-          label="Dépôt GitHub"
-          hint="Optionnel pour l'instant — nécessaire avant de lancer une nuit (push des branches). Tu peux le renseigner dans Réglages."
-        >
-          <UInput
-            v-model="createForm.github_repo"
-            class="w-full"
-            size="lg"
-            placeholder="dibodev/mon-projet (optionnel)"
-          />
-        </UFormField>
-        <UFormField label="Branche de base" hint="Par défaut : main">
-          <UInput v-model="createForm.base_branch" class="w-full" size="lg" placeholder="main" />
-        </UFormField>
-        <UFormField
-          v-if="machineId && selectedMachineName"
-          :label="`Chemin local sur ${selectedMachineName}`"
-          hint="Où le dépôt est cloné sur ce PC — l'agent y lance Claude Code."
-        >
-          <UInput
-            v-model="createForm.local_path"
-            class="w-full"
-            size="lg"
-            placeholder="C:\\Users\\moi\\Projects\\mon-projet"
-          />
-        </UFormField>
-        <p v-else class="text-xs text-[var(--app-ink-soft)]">
-          Choisis une machine dans les réglages de lancement pour renseigner le chemin local dès la création.
-        </p>
-      </form>
-
-      <template #footer>
-        <UButton color="neutral" variant="outline" class="flex-1" @click="backToPicker">Retour</UButton>
-        <UButton
-          type="submit"
-          form="create-project-form"
-          color="primary"
-          class="flex-1"
-          :loading="savingProject"
-          :disabled="!createForm.name.trim()"
-        >
-          Créer
-        </UButton>
-      </template>
-    </AppDrawer>
+      @created="onProjectCreatedFromDrawer"
+    />
 
     <!-- Project settings drawer -->
     <AppDrawer
@@ -435,6 +359,13 @@
           <UFormField label="Branche de base">
             <UInput v-model="settingsForm.base_branch" class="w-full" />
           </UFormField>
+          <div class="flex flex-col gap-2">
+            <UCheckbox v-model="settingsForm.push_to_main" label="Autoriser le push directement sur main" />
+            <AppCallout variant="info">
+              Activé par défaut. Sinon NightForge crée une branche
+              <code class="font-mono text-[0.7rem] text-[var(--app-ink)]">night/YYYY-MM-DD</code> à chaque run.
+            </AppCallout>
+          </div>
           <UButton
             type="submit"
             color="primary"
@@ -447,36 +378,17 @@
         </form>
 
         <div class="border-t border-[var(--app-line)] pt-4">
-          <p class="app-label mb-1">Chemins locaux</p>
-          <p class="mb-3 text-xs text-[var(--app-ink-soft)]">
-            Où le dépôt est cloné sur chaque machine. L'agent y lance Claude Code, commit et push.
-          </p>
           <div v-if="machines.length === 0" class="text-sm text-[var(--app-ink-soft)]">
             Ajoute d'abord une machine dans l'onglet Machines.
           </div>
-          <div v-for="machine in machines" v-else :key="machine.id" class="mb-3">
-            <UFormField :label="machine.name">
-              <div class="flex gap-2">
-                <UInput
-                  v-model="pathInputs[machine.id]"
-                  class="w-full flex-1"
-                  placeholder="C:\\Users\\moi\\Projects\\mon-projet"
-                />
-                <UButton
-                  color="neutral"
-                  variant="outline"
-                  icon="i-lucide-save"
-                  :disabled="!pathInputs[machine.id]?.trim()"
-                  @click="savePath(machine.id)"
-                />
-              </div>
-            </UFormField>
+          <div v-for="machine in machines" v-else :key="machine.id" class="mb-3 last:mb-0">
+            <ProjectLocalPathInput v-model="pathInputs[machine.id]" :machine-name="machine.name" />
           </div>
         </div>
 
         <div class="border-t border-[var(--app-line)] pt-4">
-          <UButton color="error" variant="outline" icon="i-lucide-trash-2" block @click="removeProjectPermanently">
-            Supprimer le projet
+          <UButton color="error" variant="outline" icon="i-lucide-unlink" block @click="removeProjectPermanently">
+            Détacher de NightForge
           </UButton>
         </div>
       </div>
@@ -486,10 +398,10 @@
 
 <script lang="ts" setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import AppCallout from '~/components/AppCallout.vue'
 import type { Machine, Project, ProjectMessage, QuotaPlan, QueueItem } from '~/types'
 import { listMachines } from '~/services/machinesService'
 import {
-  createProject,
   deleteProject,
   listProjectPaths,
   listProjects,
@@ -500,13 +412,14 @@ import { addQueueItem, deleteQueueItem, listQueue } from '~/services/queueServic
 import { createMessage, deleteMessage, listMessages, reorderMessages, updateMessage } from '~/services/messagesService'
 import { planQuota } from '~/services/quotaService'
 import { createRun } from '~/services/runsService'
-import { claudeModelLabel } from '~/constants/claudeModels'
+import type { AiProvider } from '~/constants/modelPresets'
 
 /**
  * Night composer — Claude-like 3-column UI to build per-project message sequences.
  * Project lifecycle (create / edit / paths / delete) and the prompt library are all
  * managed here through drawers, so no separate projects page is needed.
  */
+const { t } = useI18n()
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const STORAGE_KEY = 'nf-compose-selected-ids'
@@ -539,19 +452,19 @@ let planTimer: ReturnType<typeof setTimeout> | null = null
 
 const showPicker = ref(false)
 const showMobileLibrary = ref(false)
-const showMobileMessageSettings = ref(false)
+const sessionPopoverOpen = ref(false)
 const showCreateProject = ref(false)
 const showSettings = ref(false)
 const showLaunchSettings = ref(false)
 
-const createForm = reactive({ name: '', github_repo: '', base_branch: 'main', local_path: '' })
-const savingProject = ref(false)
-
 const settingsProject = ref<Project | null>(null)
-const settingsForm = reactive({ name: '', github_repo: '', base_branch: 'main' })
+const settingsForm = reactive({ name: '', github_repo: '', base_branch: 'main', push_to_main: true })
 const pathByProject = ref<Record<number, Record<number, string>>>({})
 const sessionByProject = ref<Record<number, string | null>>({})
 const modelByProject = ref<Record<number, string | null>>({})
+const providerByProject = ref<Record<number, AiProvider | null>>({})
+const effortByProject = ref<Record<number, string | null>>({})
+const fastByProject = ref<Record<number, boolean>>({})
 const pathInputs = ref<Record<number, string>>({})
 const savingSettings = ref(false)
 
@@ -571,9 +484,27 @@ const activeSessionId = computed({
   },
 })
 const activeModelId = computed({
-  get: () => modelByProject.value[activeId.value] ?? null,
+  get: () => modelByProject.value[activeId.value] ?? 'sonnet',
   set: (value: string | null) => {
     modelByProject.value[activeId.value] = value
+  },
+})
+const activeProvider = computed({
+  get: () => providerByProject.value[activeId.value] ?? 'claude',
+  set: (value: AiProvider | null) => {
+    providerByProject.value[activeId.value] = value
+  },
+})
+const activeEffort = computed({
+  get: () => effortByProject.value[activeId.value] ?? 'max',
+  set: (value: string | null) => {
+    effortByProject.value[activeId.value] = value
+  },
+})
+const activeFastMode = computed({
+  get: () => fastByProject.value[activeId.value] ?? false,
+  set: (value: boolean) => {
+    fastByProject.value[activeId.value] = value
   },
 })
 const canAddMessage = computed(() => Boolean(input.value.trim() || activeSessionId.value))
@@ -598,11 +529,64 @@ const launchSummary = computed(() => {
   return `${messages} ${messageLabel} · ${projects} ${projectLabel}`
 })
 
-const mobileMessageOptionsLabel = computed(() => {
-  const session = activeSessionId.value ? `Session ${activeSessionId.value.slice(0, 8)}…` : 'Nouvelle session'
-  const model = claudeModelLabel(activeModelId.value) ?? 'Modèle défaut'
-  return `${session} · ${model}`
+const composerPlaceholder = computed(() =>
+  activeSessionId.value ? t('compose.placeholderContinue') : t('compose.placeholder'),
+)
+
+const composerHint = computed(() => {
+  if (pickedIds.value.length) {
+    return t('compose.hintPicks', { n: pickedIds.value.length })
+  }
+  if (activeSessionId.value) {
+    return t('compose.hintSession')
+  }
+  return t('compose.hintAdd')
 })
+
+const sessionPillLabel = computed(() =>
+  activeSessionId.value
+    ? t('compose.sessionShort', { id: activeSessionId.value.slice(0, 8) })
+    : t('compose.sessionNew'),
+)
+
+/**
+ * Active provider/model metadata payload for createMessage.
+ */
+function activeMetaPayload(): {
+  provider?: string
+  claude_model?: string
+  effort?: string
+  fast_mode?: boolean
+} {
+  const pid = activeProject.value?.id ?? activeId.value
+  return {
+    provider: providerByProject.value[pid] ?? activeProvider.value ?? undefined,
+    claude_model: modelByProject.value[pid] ?? activeModelId.value ?? undefined,
+    effort: effortByProject.value[pid] ?? activeEffort.value ?? undefined,
+    fast_mode: fastByProject.value[pid] ?? activeFastMode.value,
+  }
+}
+
+/**
+ * Prefer metadata from the first picked queue item when composing from the library.
+ */
+function metaFromPicks(): {
+  provider?: string
+  claude_model?: string
+  effort?: string
+  fast_mode?: boolean
+} {
+  const first = activeQueue.value.find((item) => pickedIds.value.includes(item.id))
+  if (first?.provider || first?.model) {
+    return {
+      provider: first.provider ?? undefined,
+      claude_model: first.model ?? undefined,
+      effort: first.effort ?? undefined,
+      fast_mode: first.fast_mode ?? false,
+    }
+  }
+  return activeMetaPayload()
+}
 
 /**
  * Count messages for a project (sidebar badge).
@@ -720,10 +704,6 @@ function removeProject(projectId: number): void {
  * @returns Nothing.
  */
 function openCreateProject(): void {
-  createForm.name = ''
-  createForm.github_repo = ''
-  createForm.base_branch = 'main'
-  createForm.local_path = ''
   showPicker.value = false
   showCreateProject.value = true
 }
@@ -738,38 +718,24 @@ function backToPicker(): void {
 }
 
 /**
- * Create a project, then select it and return to the picker.
+ * After creating a project from the drawer, select it and refresh paths.
+ * @param project - Newly created project.
  * @returns Nothing.
  */
-async function createNewProject(): Promise<void> {
-  if (!createForm.name.trim() || savingProject.value) {
-    return
-  }
-  savingProject.value = true
-  try {
-    const project = await createProject({
-      name: createForm.name.trim(),
-      github_repo: createForm.github_repo.trim() || undefined,
-      base_branch: createForm.base_branch.trim() || 'main',
-    })
-    if (machineId.value && createForm.local_path.trim()) {
-      await setProjectPath(project.id, {
-        machine_id: machineId.value,
-        local_path: createForm.local_path.trim(),
-      })
-      pathByProject.value[project.id] = {
-        ...(pathByProject.value[project.id] ?? {}),
-        [machineId.value]: createForm.local_path.trim(),
-      }
+async function onProjectCreatedFromDrawer(project: Project): Promise<void> {
+  await refreshProjects()
+  const created = projects.value.find((p) => p.id === project.id) ?? project
+  await toggleProject(created)
+  if (machineId.value) {
+    const paths = await listProjectPaths(created.id).catch(() => [])
+    const map: Record<number, string> = {}
+    for (const path of paths) {
+      map[path.machine_id] = path.local_path
     }
-    await refreshProjects()
-    const created = projects.value.find((p) => p.id === project.id) ?? project
-    await toggleProject(created)
-    showCreateProject.value = false
-    toast.add({ title: 'Projet créé', color: 'success' })
-  } finally {
-    savingProject.value = false
+    pathByProject.value[created.id] = map
   }
+  showCreateProject.value = false
+  showPicker.value = true
 }
 
 /**
@@ -782,7 +748,8 @@ async function openSettings(project: Project): Promise<void> {
   settingsForm.name = project.name
   settingsForm.github_repo = project.github_repo
   settingsForm.base_branch = project.base_branch
-  pathInputs.value = {}
+  settingsForm.push_to_main = project.push_to_main !== false
+  pathInputs.value = Object.fromEntries(machines.value.map((machine) => [machine.id, '']))
   showSettings.value = true
   const paths = await listProjectPaths(project.id).catch(() => [])
   for (const path of paths) {
@@ -804,33 +771,31 @@ async function saveSettings(): Promise<void> {
       name: settingsForm.name.trim(),
       github_repo: settingsForm.github_repo.trim(),
       base_branch: settingsForm.base_branch.trim() || 'main',
+      push_to_main: settingsForm.push_to_main,
     })
+    const pathSaves = Object.entries(pathInputs.value)
+      .filter(([, localPath]) => localPath?.trim())
+      .map(([machineId, localPath]) =>
+        setProjectPath(settingsProject.value!.id, {
+          machine_id: Number(machineId),
+          local_path: localPath.trim(),
+        }),
+      )
+    await Promise.all(pathSaves)
+    for (const [machineId, localPath] of Object.entries(pathInputs.value)) {
+      if (!localPath?.trim()) {
+        continue
+      }
+      if (!pathByProject.value[settingsProject.value.id]) {
+        pathByProject.value[settingsProject.value.id] = {}
+      }
+      pathByProject.value[settingsProject.value.id]![Number(machineId)] = localPath.trim()
+    }
     await refreshProjects()
     toast.add({ title: 'Projet mis à jour', color: 'success' })
   } finally {
     savingSettings.value = false
   }
-}
-
-/**
- * Save a project's local path on a machine.
- * @param machineId - The machine id.
- * @returns Nothing.
- */
-async function savePath(machineId: number): Promise<void> {
-  if (!settingsProject.value) {
-    return
-  }
-  const localPath = pathInputs.value[machineId]?.trim()
-  if (!localPath) {
-    return
-  }
-  await setProjectPath(settingsProject.value.id, { machine_id: machineId, local_path: localPath })
-  if (!pathByProject.value[settingsProject.value.id]) {
-    pathByProject.value[settingsProject.value.id] = {}
-  }
-  pathByProject.value[settingsProject.value.id]![machineId] = localPath
-  toast.add({ title: 'Chemin enregistré', color: 'success' })
 }
 
 /**
@@ -846,7 +811,7 @@ async function removeProjectPermanently(): Promise<void> {
   removeProject(id)
   await refreshProjects()
   showSettings.value = false
-  toast.add({ title: 'Projet supprimé', color: 'success' })
+  toast.add({ title: 'Projet détaché', color: 'success' })
 }
 
 /**
@@ -917,7 +882,7 @@ async function createMessageFromPicks(): Promise<void> {
     source_item_ids: [...pickedIds.value],
     created_from: 'web',
     claude_session_id: sessionByProject.value[activeProject.value.id] ?? undefined,
-    claude_model: modelByProject.value[activeProject.value.id] ?? undefined,
+    ...metaFromPicks(),
   })
   messagesByProject.value[activeProject.value.id] = [
     ...(messagesByProject.value[activeProject.value.id] ?? []),
@@ -943,7 +908,7 @@ async function addMessage(): Promise<void> {
   const message = await createMessage(activeProject.value.id, {
     content,
     claude_session_id: sessionId,
-    claude_model: modelByProject.value[activeProject.value.id] ?? undefined,
+    ...activeMetaPayload(),
     source_item_ids: pickedIds.value.length ? [...pickedIds.value] : undefined,
     created_from: 'web',
   })
@@ -967,7 +932,7 @@ async function addContinueMessage(): Promise<void> {
   const message = await createMessage(activeProject.value.id, {
     content: CONTINUE_PROMPT,
     claude_session_id: activeSessionId.value,
-    claude_model: activeModelId.value ?? undefined,
+    ...activeMetaPayload(),
     created_from: 'web',
   })
   messagesByProject.value[activeProject.value.id] = [

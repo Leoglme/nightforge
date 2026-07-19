@@ -1,4 +1,4 @@
-import type { QuotaPlan } from '~/types'
+import type { QuotaPlan, UsageSummary } from '~/types'
 import { api } from '~/services/api'
 
 /**
@@ -19,4 +19,12 @@ export function planQuota(payload: {
   wait_for_fresh_quota?: boolean
 }): Promise<QuotaPlan> {
   return api.post<QuotaPlan>('/api/v1/quota/plan', payload)
+}
+
+/**
+ * Dashboard « Utilisation » — Claude Max remaining per machine.
+ * @returns Usage summary.
+ */
+export function fetchUsageSummary(): Promise<UsageSummary> {
+  return api.get<UsageSummary>('/api/v1/quota/usage')
 }

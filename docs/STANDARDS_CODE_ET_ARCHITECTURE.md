@@ -43,8 +43,17 @@ Voir [`ARCHITECTURE.md`](./ARCHITECTURE.md) pour la conception complète.
 
 ## Agent (`agent/`)
 
-- **Python** : WebSocket sortant vers le control-plane, spawn `claude` (subprocess),
-  git, lecture quota. Packagé en binaire (PyInstaller) et embarqué comme sidecar Tauri.
+- **Python** : WebSocket sortant vers le control-plane, spawn `claude` / Cursor `agent`
+  (subprocess), git, lecture quota. Packagé en binaire (PyInstaller) et embarqué comme
+  sidecar Tauri.
+
+## Documentation
+
+- **Mettre à jour les README dès qu’une feature change** (comportement UI, env, ports,
+  providers, modes de run, lifecycle agent). Le README racine est la source « comment
+  utiliser / installer » ; le détail design reste dans `docs/ARCHITECTURE.md`.
+- Pas de guide in-app : l’installation et le setup machine sont dans le README + le
+  modal Machines (étapes `.env` / token).
 
 ## Git & commits
 

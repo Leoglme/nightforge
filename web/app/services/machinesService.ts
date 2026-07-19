@@ -54,3 +54,14 @@ export function listClaudeSessions(
   const query = encodeURIComponent(localPath)
   return api.get(`/api/v1/machines/${machineId}/claude-sessions?local_path=${query}`)
 }
+
+/**
+ * Inspect a local git clone on a machine (folder name + GitHub remote).
+ * @param machineId - Machine id (must be online).
+ * @param localPath - Absolute path on that PC.
+ * @returns Detected metadata.
+ */
+export function inspectRepo(machineId: number, localPath: string): Promise<import('~/types').RepoInspect> {
+  const query = encodeURIComponent(localPath)
+  return api.get(`/api/v1/machines/${machineId}/inspect-repo?local_path=${query}`)
+}

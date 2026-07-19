@@ -14,9 +14,21 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
-from . import claude_runner, git_manager, oauth_setup, quota_reader, session_scanner
+from . import (
+    claude_login,
+    claude_runner,
+    cursor_login,
+    cursor_runner,
+    cursor_usage_reader,
+    git_manager,
+    ideas_expander,
+    oauth_credentials,
+    oauth_setup,
+    quota_reader,
+    session_scanner,
+)
 from .claude_runner import DEFAULT_CONTINUE_PROMPT, looks_like_auth_failure
 from .config import AgentConfig, try_load_config
 from .ws_client import WsClient
@@ -47,6 +59,10 @@ class _RunState:
     quotas_consumed: int = 0
     projects: list = field(default_factory=list)
     session_by_message: Dict[int, Optional[str]] = field(default_factory=dict)
+    cursor_accounts: list = field(default_factory=list)
+    claude_accounts: list = field(default_factory=list)
+    processed_message_ids: Set[int] = field(default_factory=set)
+    had_message_failure: bool = False
 
 
 class Worker:
@@ -60,7 +76,7 @@ class Worker:
             config: Agent configuration.
         """
         self._config = config
-        oauth_setup.ensure_api_key_helper_configured()
+        oauth_setup.remove_nightforge_api_key_helper()
         self._client = WsClient(self._fresh_config, self._on_message)
         self._run_state: Optional[_RunState] = None
         self._stop_requested = False
@@ -68,6 +84,7 @@ class Worker:
         self._last_reset_hint: Optional[datetime] = None
         self._run_task: Optional[asyncio.Task] = None
         self._redispatch_pending = False
+        self._pending_runs: list[dict] = []
 
     def _fresh_config(self) -> Optional[AgentConfig]:
         """
@@ -92,19 +109,23 @@ class Worker:
                 await self._tick()
             except Exception as exc:  # noqa: BLE001
                 logger.error("Unhandled error in heartbeat tick: %s", exc, exc_info=True)
-            await asyncio.sleep(self._config.tick_seconds)
+            # Slower ticks when idle to reduce CPU/network; faster while working.
+            delay = (
+                self._config.tick_seconds_working
+                if self._run_state is not None
+                else self._config.tick_seconds
+            )
+            await asyncio.sleep(delay)
 
     async def _tick(self) -> None:
         """One heartbeat: push status and any available quota reading."""
         status = "WORKING" if self._run_state is not None else "IDLE"
         await self._client.send({"type": "status", "status": status})
 
-        reading = await quota_reader.read_five_hour(self._last_reset_hint)
-        if (
-            reading is not None
-            and reading.auth_error is None
-            and (reading.resets_at is not None or reading.utilization > 0)
-        ):
+        readings = await quota_reader.read_all_buckets(self._last_reset_hint)
+        for reading in readings:
+            if reading.auth_error:
+                continue
             await self._client.send(
                 {
                     "type": "quota",
@@ -113,6 +134,20 @@ class Worker:
                     "resets_at": reading.resets_at.isoformat() if reading.resets_at else None,
                 }
             )
+
+        # Best-effort Cursor plan usage (omit when unavailable).
+        try:
+            for bucket in await cursor_usage_reader.read_cursor_usage():
+                await self._client.send(
+                    {
+                        "type": "quota",
+                        "bucket": bucket.bucket,
+                        "utilization": bucket.utilization,
+                        "resets_at": bucket.resets_at.isoformat() if bucket.resets_at else None,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Cursor usage tick skipped: %s", exc)
 
     async def _on_message(self, message: dict) -> None:
         """
@@ -123,7 +158,10 @@ class Worker:
         """
         msg_type = message.get("type")
         if msg_type == "run.payload":
-            await self._handle_run_payload(message["run"])
+            try:
+                await self._handle_run_payload(message["run"])
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to handle run.payload: %s", exc, exc_info=True)
         elif msg_type == "run.stop":
             run_id = message.get("run_id")
             if run_id is None or (
@@ -132,28 +170,292 @@ class Worker:
                 self._stop_requested = True
         elif msg_type == "sessions.list":
             await self._handle_sessions_list(message)
+        elif msg_type == "repo.inspect":
+            await self._handle_repo_inspect(message)
         elif msg_type == "run.update":
             await self._handle_run_update(message.get("run", {}))
         elif msg_type == "quota.read":
             await self._handle_quota_read(message)
+        elif msg_type == "cursor.usage":
+            await self._handle_cursor_usage(message)
+        elif msg_type == "cursor.session.export":
+            await self._handle_cursor_session_export(message)
+        elif msg_type == "cursor.login.start":
+            await self._handle_cursor_login_start(message)
+        elif msg_type == "cursor.login.poll":
+            await self._handle_cursor_login_poll(message)
+        elif msg_type == "cursor.login.complete":
+            await self._handle_cursor_login_complete(message)
+        elif msg_type == "cursor.login.cancel":
+            await self._handle_cursor_login_cancel(message)
+        elif msg_type == "claude.usage":
+            await self._handle_claude_usage(message)
+        elif msg_type == "claude.session.export":
+            await self._handle_claude_session_export(message)
+        elif msg_type == "claude.login.start":
+            await self._handle_claude_login_start(message)
+        elif msg_type == "claude.login.poll":
+            await self._handle_claude_login_poll(message)
+        elif msg_type == "claude.login.complete":
+            await self._handle_claude_login_complete(message)
+        elif msg_type == "claude.login.cancel":
+            await self._handle_claude_login_cancel(message)
+        elif msg_type == "ideas.expand":
+            await self._handle_ideas_expand(message)
 
     async def _handle_quota_read(self, message: dict) -> None:
         """
-        Reply with a fresh OAuth quota reading for the quota planner UI.
+        Reply with fresh OAuth quota readings (all Claude buckets) for the UI.
 
         Args:
             message: Command with optional ``request_id``.
         """
         quota_reader.invalidate_cache()
-        reading = await quota_reader.read_five_hour(self._last_reset_hint)
+        readings = await quota_reader.read_all_buckets(self._last_reset_hint)
+        five = next((r for r in readings if r.bucket == "five_hour"), None)
         await self._client.send(
             {
                 "type": "quota.response",
                 "request_id": message.get("request_id"),
-                "bucket": reading.bucket if reading else None,
-                "utilization": reading.utilization if reading else None,
-                "resets_at": reading.resets_at.isoformat() if reading and reading.resets_at else None,
-                "auth_error": reading.auth_error if reading else None,
+                "bucket": five.bucket if five else None,
+                "utilization": five.utilization if five else None,
+                "resets_at": five.resets_at.isoformat() if five and five.resets_at else None,
+                "auth_error": five.auth_error if five else None,
+                "buckets": [
+                    {
+                        "bucket": r.bucket,
+                        "utilization": r.utilization,
+                        "resets_at": r.resets_at.isoformat() if r.resets_at else None,
+                        "auth_error": r.auth_error,
+                    }
+                    for r in readings
+                ],
+            }
+        )
+
+    async def _handle_cursor_usage(self, message: dict) -> None:
+        """
+        Reply with Cursor plan usage when the local session can fetch it.
+
+        Args:
+            message: Command with optional ``request_id``.
+        """
+        buckets = await cursor_usage_reader.read_cursor_usage(force=True)
+        _token, email = cursor_usage_reader.export_local_session()
+        await self._client.send(
+            {
+                "type": "cursor.usage.response",
+                "request_id": message.get("request_id"),
+                "email": email,
+                "buckets": [
+                    {
+                        "bucket": b.bucket,
+                        "label": b.label,
+                        "utilization": b.utilization,
+                        "resets_at": b.resets_at.isoformat() if b.resets_at else None,
+                    }
+                    for b in buckets
+                ],
+            }
+        )
+
+    async def _handle_cursor_session_export(self, message: dict) -> None:
+        """
+        Export the local Cursor session token for vault import.
+
+        Args:
+            message: Command with optional ``request_id``.
+        """
+        token, email = cursor_usage_reader.export_local_session()
+        await self._client.send(
+            {
+                "type": "cursor.session.export.response",
+                "request_id": message.get("request_id"),
+                "session_token": token,
+                "email": email,
+                "error": None if token else "Session Cursor locale introuvable",
+            }
+        )
+
+    async def _handle_cursor_login_start(self, message: dict) -> None:
+        """Start NoDriver Cursor login (isolated Chromium)."""
+        result = await cursor_login.start_login(self._config.cursor_bin)
+        await self._client.send(
+            {
+                "type": "cursor.login.start.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_cursor_login_poll(self, message: dict) -> None:
+        """Poll an in-progress NoDriver Cursor login."""
+        login_id = str(message.get("login_id") or "")
+        result = await cursor_login.poll_login(login_id)
+        await self._client.send(
+            {
+                "type": "cursor.login.poll.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_cursor_login_complete(self, message: dict) -> None:
+        """User confirmed NoDriver login finished — capture cookie."""
+        login_id = str(message.get("login_id") or "")
+        result = await cursor_login.complete_login(login_id)
+        await self._client.send(
+            {
+                "type": "cursor.login.complete.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_cursor_login_cancel(self, message: dict) -> None:
+        """Cancel NoDriver login and close the helper browser."""
+        login_id = str(message.get("login_id") or "")
+        result = await cursor_login.cancel_login(login_id)
+        await self._client.send(
+            {
+                "type": "cursor.login.cancel.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_claude_usage(self, message: dict) -> None:
+        """
+        Reply with every Claude Max bucket + best-effort email for the local session.
+
+        Args:
+            message: Command with optional ``request_id``.
+        """
+        quota_reader.invalidate_cache()
+        readings = await quota_reader.read_all_buckets(self._last_reset_hint)
+        _oauth, email = await quota_reader.export_local_oauth()
+        five = next((r for r in readings if r.bucket == "five_hour"), None)
+        await self._client.send(
+            {
+                "type": "claude.usage.response",
+                "request_id": message.get("request_id"),
+                "email": email,
+                "auth_error": five.auth_error if five else None,
+                "buckets": [
+                    {
+                        "bucket": r.bucket,
+                        "utilization": r.utilization,
+                        "resets_at": r.resets_at.isoformat() if r.resets_at else None,
+                        "auth_error": r.auth_error,
+                    }
+                    for r in readings
+                ],
+            }
+        )
+
+    async def _handle_claude_session_export(self, message: dict) -> None:
+        """
+        Export the local Claude OAuth block + email for vault import.
+
+        Refreshes an expired access token when possible; does not open the browser.
+        """
+        oauth, email = await quota_reader.export_local_oauth()
+        error = None
+        if not oauth:
+            error = "Session Claude locale introuvable"
+        await self._client.send(
+            {
+                "type": "claude.session.export.response",
+                "request_id": message.get("request_id"),
+                "oauth": oauth,
+                "email": email,
+                "error": error,
+            }
+        )
+
+    async def _handle_claude_login_start(self, message: dict) -> None:
+        """Start a ``claude auth login`` capture (extra account, or machine first connect)."""
+        keep_on_machine = bool(message.get("keep_on_machine"))
+        result = await claude_login.start_login(
+            self._config.claude_bin,
+            keep_on_machine=keep_on_machine,
+        )
+        await self._client.send(
+            {
+                "type": "claude.login.start.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_claude_login_poll(self, message: dict) -> None:
+        """Poll an in-progress Claude login capture."""
+        login_id = str(message.get("login_id") or "")
+        result = await claude_login.poll_login(login_id)
+        await self._client.send(
+            {
+                "type": "claude.login.poll.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_claude_login_complete(self, message: dict) -> None:
+        """User confirmed Claude login finished — capture OAuth block."""
+        login_id = str(message.get("login_id") or "")
+        result = await claude_login.complete_login(login_id)
+        await self._client.send(
+            {
+                "type": "claude.login.complete.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_claude_login_cancel(self, message: dict) -> None:
+        """Cancel Claude login capture and restore the machine's own session."""
+        login_id = str(message.get("login_id") or "")
+        result = await claude_login.cancel_login(login_id)
+        await self._client.send(
+            {
+                "type": "claude.login.cancel.response",
+                "request_id": message.get("request_id"),
+                **result,
+            }
+        )
+
+    async def _handle_ideas_expand(self, message: dict) -> None:
+        """
+        Expand free-form ideas into queue prompts via Cursor / Claude.
+
+        Args:
+            message: Command with ``prompt``, ``prefer_provider``, ``request_id``.
+        """
+        request_id = message.get("request_id")
+        prompt = message.get("prompt")
+        if not isinstance(prompt, str) or not prompt.strip():
+            await self._client.send(
+                {
+                    "type": "ideas.expand.response",
+                    "request_id": request_id,
+                    "error": "missing prompt",
+                    "items": [],
+                }
+            )
+            return
+
+        prefer = message.get("prefer_provider") or "cursor"
+        result = await ideas_expander.expand_ideas(
+            prompt=prompt.strip(),
+            prefer_provider=str(prefer),
+            cursor_bin=self._config.cursor_bin,
+            claude_bin=self._config.claude_bin,
+        )
+        await self._client.send(
+            {
+                "type": "ideas.expand.response",
+                "request_id": request_id,
+                **result,
             }
         )
 
@@ -185,6 +487,27 @@ class Worker:
             }
         )
 
+    async def _handle_repo_inspect(self, message: dict) -> None:
+        """
+        Inspect a local path (folder name + git remote) and reply.
+
+        Args:
+            message: Command with ``local_path`` and ``request_id``.
+        """
+        local_path = message.get("local_path")
+        request_id = message.get("request_id")
+        if not isinstance(local_path, str) or not local_path.strip():
+            payload = {"exists": False, "is_git": False, "error": "missing local_path"}
+        else:
+            payload = await git_manager.inspect_repo(local_path.strip())
+        await self._client.send(
+            {
+                "type": "repo.inspect.response",
+                "request_id": request_id,
+                **payload,
+            }
+        )
+
     async def _handle_run_update(self, run: dict) -> None:
         """
         Update quota budget or redispatch while a run is active.
@@ -209,6 +532,11 @@ class Worker:
             self._hydrate_sessions(self._run_state)
             self._redispatch_pending = True
 
+        if "cursor_accounts" in run:
+            self._run_state.cursor_accounts = list(run.get("cursor_accounts") or [])
+        if "claude_accounts" in run:
+            self._run_state.claude_accounts = list(run.get("claude_accounts") or [])
+
     async def _handle_run_payload(self, run: dict) -> None:
         """
         Start or refresh a run from its payload.
@@ -217,19 +545,52 @@ class Worker:
             run: The run payload.
         """
         run_id = int(run["id"])
+        message_count = sum(len(p.get("messages") or []) for p in (run.get("projects") or []))
+        logger.info(
+            "Received run.payload id=%s projects=%s pending_messages=%s",
+            run_id,
+            len(run.get("projects") or []),
+            message_count,
+        )
         if self._run_state is not None and self._run_state.run_id == run_id:
             self._run_state.quota_limit = int(run.get("quota_count", self._run_state.quota_limit))
             self._run_state.projects = run.get("projects", self._run_state.projects)
             self._run_state.window_end = _parse_dt(run.get("window_end"))
+            if "cursor_accounts" in run:
+                self._run_state.cursor_accounts = list(run.get("cursor_accounts") or [])
+            if "claude_accounts" in run:
+                self._run_state.claude_accounts = list(run.get("claude_accounts") or [])
             self._hydrate_sessions(self._run_state)
             self._redispatch_pending = True
             return
 
         if self._run_state is not None:
-            logger.info("A run is already active (%s); ignoring run %s", self._run_state.run_id, run_id)
+            self._enqueue_pending_run(run)
+            logger.info(
+                "Run %s queued behind active run %s (%s pending)",
+                run_id,
+                self._run_state.run_id,
+                len(self._pending_runs),
+            )
             return
 
         self._run_task = asyncio.create_task(self._execute_run(run))
+
+    def _enqueue_pending_run(self, run: dict) -> None:
+        """Keep at most one pending payload per run id (latest wins)."""
+        run_id = int(run["id"])
+        self._pending_runs = [item for item in self._pending_runs if int(item.get("id", -1)) != run_id]
+        self._pending_runs.append(run)
+
+    @staticmethod
+    def _run_needs_claude_quota(run: dict) -> bool:
+        """True when at least one message will use Claude Code (not Cursor-only)."""
+        for project in run.get("projects") or []:
+            for message in project.get("messages") or []:
+                provider = str(message.get("provider") or "claude").strip().lower()
+                if provider != "cursor":
+                    return True
+        return False
 
     # ------------------------------------------------------------------ run
 
@@ -248,6 +609,8 @@ class Worker:
             quota_limit=int(run.get("quota_count", 1)),
             quotas_consumed=int(run.get("quotas_consumed", 0)),
             projects=run.get("projects", []),
+            cursor_accounts=list(run.get("cursor_accounts") or []),
+            claude_accounts=list(run.get("claude_accounts") or []),
         )
         self._hydrate_sessions(self._run_state)
         self._stop_requested = False
@@ -255,14 +618,23 @@ class Worker:
         self._redispatch_pending = False
 
         wait_until = _parse_dt(run.get("quota_wait_until"))
-        if not await self._ensure_quota_available(run_id, wait_until):
-            await self._set_run_status(run_id, "STOPPED")
-            await self._emit(run_id, "info", f"Run {run_id} stopped before start (quota/window)")
-            self._run_state = None
-            self._run_task = None
-            return
+        if self._run_needs_claude_quota(run):
+            if not await self._ensure_quota_available(run_id, wait_until):
+                await self._finalize_unprocessed_messages(
+                    reason="Arrêté avant démarrage (quota / fenêtre)",
+                    status="SKIPPED",
+                    count_as_failure=False,
+                )
+                await self._set_run_status(run_id, "STOPPED")
+                await self._emit(run_id, "info", f"Run {run_id} stopped before start (quota/window)")
+                self._finish_run_and_start_next()
+                return
+        else:
+            logger.info("Run %s: Cursor-only — skip Claude quota wait", run_id)
+            await self._emit(run_id, "info", f"Run {run_id}: Cursor-only — skip Claude quota wait")
 
         await self._set_run_status(run_id, "RUNNING")
+        logger.info("Run %s started", run_id)
         await self._emit(run_id, "info", f"Run {run_id} started")
 
         try:
@@ -289,16 +661,32 @@ class Worker:
                 self._redispatch_pending = False
                 await self._emit(run_id, "info", "Run updated — continuing with pending messages")
 
+            await self._finalize_unprocessed_messages()
             final = self._final_status()
             await self._set_run_status(run_id, final)
+            logger.info("Run %s finished (%s)", run_id, final)
             await self._emit(run_id, "info", f"Run {run_id} finished ({final})")
         except Exception as exc:  # noqa: BLE001
             logger.error("Run %s crashed: %s", run_id, exc, exc_info=True)
             await self._emit(run_id, "error", f"Run crashed: {exc}")
+            await self._finalize_unprocessed_messages(
+                reason=f"Run crashed: {exc}",
+                status="FAILED",
+                count_as_failure=True,
+            )
             await self._set_run_status(run_id, "FAILED")
         finally:
-            self._run_state = None
-            self._run_task = None
+            self._finish_run_and_start_next()
+
+    def _finish_run_and_start_next(self) -> None:
+        """Clear active run state and start the next queued payload if any."""
+        self._run_state = None
+        self._run_task = None
+        if not self._pending_runs:
+            return
+        next_run = self._pending_runs.pop(0)
+        logger.info("Starting queued run %s (%s remaining)", next_run.get("id"), len(self._pending_runs))
+        self._run_task = asyncio.create_task(self._execute_run(next_run))
 
     @staticmethod
     def _hydrate_sessions(state: _RunState) -> None:
@@ -323,7 +711,51 @@ class Worker:
             return "STOPPED"
         if self._budget_exhausted():
             return "FAILED"
+        if self._run_state is not None and self._run_state.had_message_failure:
+            return "FAILED"
         return "COMPLETED"
+
+    async def _finalize_unprocessed_messages(
+        self,
+        reason: Optional[str] = None,
+        status: Optional[str] = None,
+        count_as_failure: Optional[bool] = None,
+    ) -> None:
+        """
+        Mark any payload messages still unprocessed before the run ends.
+
+        Prevents the control-plane from showing PENDING forever after a run
+        ends without executing them (e.g. missing local path).
+        """
+        if self._run_state is None:
+            return
+        if status is None:
+            status = "SKIPPED" if self._stop_requested else "FAILED"
+        if reason is None:
+            reason = (
+                "Arrêté avant exécution"
+                if status == "SKIPPED"
+                else "Non exécuté avant la fin du run"
+            )
+        if count_as_failure is None:
+            count_as_failure = status == "FAILED"
+        for project in self._run_state.projects:
+            for message in project.get("messages") or []:
+                message_id = message.get("id")
+                if message_id is None:
+                    continue
+                mid = int(message_id)
+                if mid in self._run_state.processed_message_ids:
+                    continue
+                self._run_state.processed_message_ids.add(mid)
+                if count_as_failure:
+                    self._run_state.had_message_failure = True
+                await self._set_message_status(mid, status, reason)
+                await self._emit(
+                    self._run_state.run_id,
+                    "error" if count_as_failure else "warning",
+                    f"Message #{mid}: {reason}",
+                )
 
     def _budget_exhausted(self) -> bool:
         """
@@ -416,16 +848,38 @@ class Worker:
         name = project.get("name", "project")
         messages = project.get("messages", [])
         if not messages:
+            logger.info("Run %s project %s: no pending messages", run_id, name)
             return
         if not cwd:
-            await self._emit(run_id, "error", f"{name}: no local path set for this machine")
+            error = (
+                f"{name}: aucun chemin local configuré pour cette machine — "
+                "ouvre Réglages du projet et renseigne le dossier local."
+            )
+            logger.error("Run %s: %s", run_id, error)
+            await self._emit(run_id, "error", error)
+            if self._run_state is not None:
+                self._run_state.had_message_failure = True
+            for message in messages:
+                message_id = message.get("id")
+                if message_id is None:
+                    continue
+                mid = int(message_id)
+                if self._run_state is not None:
+                    self._run_state.processed_message_ids.add(mid)
+                await self._set_message_status(mid, "FAILED", error)
             return
 
         if not await git_manager.ensure_clean(cwd):
             await self._emit(run_id, "warning", f"{name}: working tree not clean, continuing")
 
-        branch = await git_manager.create_night_branch(cwd, project.get("base_branch") or "main")
-        await self._emit(run_id, "info", f"{name}: on branch {branch}")
+        base_branch = project.get("base_branch") or "main"
+        push_to_main = bool(project.get("push_to_main", True))
+        if push_to_main:
+            branch = await git_manager.ensure_on_branch(cwd, base_branch)
+            await self._emit(run_id, "info", f"{name}: pushing on {branch} (no night branch)")
+        else:
+            branch = await git_manager.create_night_branch(cwd, base_branch)
+            await self._emit(run_id, "info", f"{name}: on branch {branch}")
 
         did_work = False
         for index, message in enumerate(messages):
@@ -490,35 +944,65 @@ class Worker:
         if resume_session and not prompt:
             prompt = DEFAULT_CONTINUE_PROMPT
 
+        provider = (message.get("provider") or "claude").strip().lower()
+        model = message.get("claude_model") or message.get("model") or None
+        effort = message.get("effort") or None
+        fast_mode = bool(message.get("fast_mode"))
+
         while True:
             if self._stop_requested or self._window_passed():
                 await self._set_message_status(message_id, "SKIPPED")
+                self._mark_message_processed(message_id, failed=True)
                 return False
 
             await self._set_message_status(message_id, "RUNNING")
-            await quota_reader.ensure_oauth_fresh()
-            exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
-                run_id,
-                cwd,
-                prompt,
-                resume_session=resume_session,
-                model=message.get("claude_model") or None,
-            )
 
-            if auth_failed:
-                await self._emit(
+            if provider == "cursor":
+                account = self._pick_cursor_account()
+                exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_cursor(
                     run_id,
-                    "warning",
-                    "Session Claude expirée — reconnexion automatique en cours…",
+                    cwd,
+                    prompt,
+                    model=model,
+                    effort=effort,
+                    fast_mode=fast_mode,
+                    cursor_account=account,
                 )
-                if await quota_reader.ensure_oauth_fresh():
-                    exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
+                if account is not None:
+                    await self._refresh_cursor_account_usage(account)
+            else:
+                claude_account = self._pick_claude_account()
+                if claude_account is None:
+                    await quota_reader.ensure_oauth_fresh()
+                exit_code, quota_hit, reset_hint, session_id, auth_failed = await self._run_claude(
+                    run_id,
+                    cwd,
+                    prompt,
+                    resume_session=resume_session,
+                    model=model,
+                    effort=effort,
+                    claude_account=claude_account,
+                )
+                if claude_account is not None:
+                    await self._refresh_claude_account_usage(claude_account)
+
+                if auth_failed and claude_account is None:
+                    await self._emit(
                         run_id,
-                        cwd,
-                        prompt,
-                        resume_session=resume_session,
-                        model=message.get("claude_model") or None,
+                        "warning",
+                        "Session Claude expirée — reconnexion automatique en cours…",
                     )
+                    if await quota_reader.ensure_oauth_fresh():
+                        exit_code, quota_hit, reset_hint, session_id, auth_failed = (
+                            await self._run_claude(
+                                run_id,
+                                cwd,
+                                prompt,
+                                resume_session=resume_session,
+                                model=model,
+                                effort=effort,
+                            )
+                        )
 
             if session_id and message_id is not None and self._run_state is not None:
                 self._run_state.session_by_message[int(message_id)] = session_id
@@ -531,7 +1015,7 @@ class Worker:
                 )
                 resume_session = session_id
 
-            if quota_hit:
+            if quota_hit and provider != "cursor":
                 if self._run_state is not None:
                     self._run_state.quotas_consumed += 1
                 self._last_reset_hint = reset_hint
@@ -541,10 +1025,12 @@ class Worker:
                 resumed = await self._wait_for_quota(reset_hint)
                 if not resumed:
                     await self._set_message_status(message_id, "SKIPPED")
+                    self._mark_message_processed(message_id, failed=True)
                     return False
                 if self._quota_budget_exhausted():
                     await self._emit(run_id, "info", "Quota budget exhausted after reset wait")
                     await self._set_message_status(message_id, "SKIPPED")
+                    self._mark_message_processed(message_id, failed=True)
                     return False
                 await self._set_run_status(run_id, "RUNNING")
                 prompt = DEFAULT_CONTINUE_PROMPT
@@ -553,12 +1039,22 @@ class Worker:
             if exit_code == 0:
                 self._failures = 0
                 await self._set_message_status(message_id, "DONE")
+                self._mark_message_processed(message_id, failed=False)
                 return True
 
             self._failures += 1
             await self._set_message_status(message_id, "FAILED", f"exit code {exit_code}")
+            self._mark_message_processed(message_id, failed=True)
             await self._emit(run_id, "error", f"Message failed (exit {exit_code})")
             return False
+
+    def _mark_message_processed(self, message_id: Optional[int], *, failed: bool) -> None:
+        """Record that a message reached a terminal status during this run."""
+        if message_id is None or self._run_state is None:
+            return
+        self._run_state.processed_message_ids.add(int(message_id))
+        if failed:
+            self._run_state.had_message_failure = True
 
     async def _run_claude(
         self,
@@ -567,6 +1063,8 @@ class Worker:
         prompt: str,
         resume_session: Optional[str] = None,
         model: Optional[str] = None,
+        effort: Optional[str] = None,
+        claude_account: Optional[dict] = None,
     ) -> tuple[int, bool, Optional[datetime], Optional[str], bool]:
         """
         Stream one Claude invocation, emitting output as events.
@@ -577,6 +1075,8 @@ class Worker:
             prompt: Prompt text.
             resume_session: Optional session UUID to resume.
             model: Optional Claude model alias.
+            effort: Optional effort level.
+            claude_account: Vaulted account to use instead of the machine's own session.
 
         Returns:
             Tuple of exit code, quota hit, reset hint, session id and auth-failure flag.
@@ -587,12 +1087,23 @@ class Worker:
         session_id: Optional[str] = resume_session
         auth_failed = False
 
+        if claude_account is not None:
+            access_token = claude_account.get("access_token")
+            label = str(
+                claude_account.get("label") or claude_account.get("email") or f"#{claude_account.get('id')}"
+            )
+            await self._emit(run_id, "info", f"Claude — compte={label}")
+        else:
+            access_token = oauth_credentials.current_access_token()
+
         async for line in claude_runner.run_prompt(
             self._config.claude_bin,
             cwd,
             prompt,
             resume_session=resume_session,
             model=model,
+            effort=effort,
+            access_token=access_token,
         ):
             if line.startswith("__NF_RESULT__:"):
                 parts = line.split(":", 4)
@@ -611,6 +1122,197 @@ class Worker:
             await self._emit(run_id, "info", line)
 
         return exit_code, quota_hit, reset_hint, session_id, auth_failed
+
+    def _pick_cursor_account(self) -> Optional[dict]:
+        """
+        Choose the vaulted Cursor account with the lowest average utilization.
+
+        Returns:
+            Account dict from the run payload, or None to use the machine default.
+        """
+        if self._run_state is None:
+            return None
+        accounts = list(self._run_state.cursor_accounts or [])
+        if not accounts:
+            return None
+
+        scored: list[tuple[float, dict]] = []
+        for account in accounts:
+            auto_u = account.get("auto_utilization")
+            api_u = account.get("api_utilization")
+            values = [float(v) for v in (auto_u, api_u) if isinstance(v, (int, float))]
+            if not values:
+                scored.append((0.99, account))
+                continue
+            avg = sum(values) / len(values)
+            if avg >= 0.999:
+                continue
+            scored.append((avg, account))
+
+        if not scored:
+            # All exhausted — still try the lowest so the CLI can fail loudly.
+            fallback = sorted(
+                accounts,
+                key=lambda a: (
+                    (
+                        (float(a["auto_utilization"]) if isinstance(a.get("auto_utilization"), (int, float)) else 1.0)
+                        + (float(a["api_utilization"]) if isinstance(a.get("api_utilization"), (int, float)) else 1.0)
+                    )
+                    / 2.0
+                ),
+            )
+            return fallback[0] if fallback else None
+
+        scored.sort(key=lambda item: item[0])
+        return scored[0][1]
+
+    def _pick_claude_account(self) -> Optional[dict]:
+        """
+        Choose the vaulted Claude account with the lowest five-hour utilization.
+
+        Returns:
+            Account dict from the run payload, or None to use the machine's own session.
+        """
+        if self._run_state is None:
+            return None
+        accounts = [
+            a for a in (self._run_state.claude_accounts or []) if a.get("access_token")
+        ]
+        if not accounts:
+            return None
+
+        scored: list[tuple[float, dict]] = []
+        for account in accounts:
+            five_u = account.get("five_hour_utilization")
+            if not isinstance(five_u, (int, float)):
+                scored.append((0.99, account))
+                continue
+            if float(five_u) >= 0.999:
+                continue
+            scored.append((float(five_u), account))
+
+        if not scored:
+            # All exhausted — still try the lowest so the CLI can fail loudly.
+            fallback = sorted(
+                accounts,
+                key=lambda a: (
+                    float(a["five_hour_utilization"])
+                    if isinstance(a.get("five_hour_utilization"), (int, float))
+                    else 1.0
+                ),
+            )
+            return fallback[0] if fallback else None
+
+        scored.sort(key=lambda item: item[0])
+        return scored[0][1]
+
+    async def _refresh_claude_account_usage(self, account: dict) -> None:
+        """
+        Best-effort re-read Claude Max usage for the account just used (in-memory cache).
+
+        Args:
+            account: Mutable account dict from ``claude_accounts``.
+        """
+        access_token = account.get("access_token")
+        if not isinstance(access_token, str) or not access_token.strip():
+            return
+        try:
+            readings = await quota_reader.read_usage_for_access_token(access_token)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Post-prompt Claude usage refresh failed: %s", exc)
+            return
+        for reading in readings:
+            if reading.bucket == "five_hour":
+                account["five_hour_utilization"] = reading.utilization
+            elif reading.bucket == "seven_day":
+                account["seven_day_utilization"] = reading.utilization
+            elif reading.bucket == "seven_day_opus":
+                account["seven_day_opus_utilization"] = reading.utilization
+
+    async def _refresh_cursor_account_usage(self, account: dict) -> None:
+        """
+        Best-effort re-read plan usage for the account just used and update in-memory cache.
+
+        Args:
+            account: Mutable account dict from ``cursor_accounts``.
+        """
+        token = account.get("session_token")
+        if not isinstance(token, str) or not token.strip():
+            return
+        try:
+            buckets = await cursor_usage_reader.read_cursor_usage_for_token(token)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Post-prompt Cursor usage refresh failed: %s", exc)
+            return
+        for bucket in buckets:
+            if bucket.bucket == "cursor_auto":
+                account["auto_utilization"] = bucket.utilization
+            elif bucket.bucket == "cursor_api":
+                account["api_utilization"] = bucket.utilization
+
+    async def _run_cursor(
+        self,
+        run_id: int,
+        cwd: str,
+        prompt: str,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
+        fast_mode: bool = False,
+        cursor_account: Optional[dict] = None,
+    ) -> tuple[int, bool, Optional[datetime], Optional[str], bool]:
+        """
+        Stream one Cursor Agent invocation.
+
+        Returns:
+            Same tuple shape as ``_run_claude`` (quota/session unused for Cursor).
+        """
+        exit_code = 0
+        api_key = None
+        session_token = None
+        label = "machine locale"
+        if cursor_account:
+            api_key = cursor_account.get("api_key")
+            session_token = cursor_account.get("session_token")
+            label = str(
+                cursor_account.get("label")
+                or cursor_account.get("email")
+                or f"#{cursor_account.get('id')}"
+            )
+        else:
+            # No vault pick — still try silent IDE session auth.
+            local_token, local_email = cursor_usage_reader.export_local_session()
+            if local_token:
+                session_token = local_token
+                label = f"IDE locale ({local_email})" if local_email else "IDE locale"
+
+        await self._emit(
+            run_id,
+            "info",
+            f"Cursor Agent — compte={label} model={model or 'default'} "
+            f"effort={effort or '-'} fast={fast_mode}",
+        )
+        try:
+            async for line in cursor_runner.run_prompt(
+                self._config.cursor_bin,
+                cwd,
+                prompt,
+                model=model,
+                effort=effort,
+                fast_mode=fast_mode,
+                api_key=api_key if isinstance(api_key, str) else None,
+                session_token=session_token if isinstance(session_token, str) else None,
+            ):
+                if line.startswith("__NF_RESULT__:"):
+                    parts = line.split(":", 4)
+                    exit_code = int(parts[1]) if len(parts) > 1 and parts[1] else 0
+                    continue
+                await self._emit(run_id, "info", line)
+        except (cursor_runner.CursorBinNotFoundError, cursor_runner.CursorInstallError) as exc:
+            logger.error("Cursor CLI unavailable: %s", exc)
+            await self._emit(run_id, "error", str(exc))
+            return 127, False, None, None, False
+
+        return exit_code, False, None, None, False
 
     async def _wait_for_quota(self, reset_hint: Optional[datetime]) -> bool:
         """

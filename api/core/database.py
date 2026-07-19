@@ -59,6 +59,8 @@ def init_db() -> None:
     from models.run_event import RunEvent  # noqa: F401
     from models.run_message import RunMessage  # noqa: F401
     from models.quota_snapshot import QuotaSnapshot  # noqa: F401
+    from models.cursor_account import CursorAccount  # noqa: F401
+    from models.claude_account import ClaudeAccount  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_optional_columns()
@@ -69,14 +71,42 @@ def _ensure_optional_columns() -> None:
     from sqlalchemy import inspect, text
 
     additions = {
+        "queue_items": [
+            ("title", "VARCHAR(120) NULL"),
+            ("provider", "VARCHAR(20) NULL"),
+            ("model", "VARCHAR(64) NULL"),
+            ("effort", "VARCHAR(16) NULL"),
+            ("fast_mode", "BOOLEAN NOT NULL DEFAULT 0"),
+        ],
         "run_messages": [
             ("claude_session_id", "VARCHAR(64) NULL"),
-            ("claude_model", "VARCHAR(32) NULL"),
+            ("claude_model", "VARCHAR(64) NULL"),
+            ("provider", "VARCHAR(20) NULL"),
+            ("effort", "VARCHAR(16) NULL"),
+            ("fast_mode", "BOOLEAN NOT NULL DEFAULT 0"),
             ("source_item_ids", "JSON NULL"),
         ],
         "project_messages": [
             ("claude_session_id", "VARCHAR(64) NULL"),
-            ("claude_model", "VARCHAR(32) NULL"),
+            ("claude_model", "VARCHAR(64) NULL"),
+            ("provider", "VARCHAR(20) NULL"),
+            ("effort", "VARCHAR(16) NULL"),
+            ("fast_mode", "BOOLEAN NOT NULL DEFAULT 0"),
+        ],
+        "machines": [
+            ("cursor_version", "VARCHAR(64) NULL"),
+        ],
+        "runs": [
+            ("kind", "VARCHAR(16) NOT NULL DEFAULT 'night'"),
+        ],
+        "projects": [
+            ("push_to_main", "BOOLEAN NOT NULL DEFAULT 1"),
+        ],
+        "cursor_accounts": [
+            ("from_machine", "BOOLEAN NOT NULL DEFAULT 0"),
+        ],
+        "claude_accounts": [
+            ("from_machine", "BOOLEAN NOT NULL DEFAULT 0"),
         ],
     }
     inspector = inspect(engine)

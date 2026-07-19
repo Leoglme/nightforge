@@ -21,6 +21,7 @@
       "allow": [{ "url": "https://**" }, { "url": "http://**" }]
     },
     "os:allow-hostname",
+    "dialog:default",
     {
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "$HOME/.nightforge" }, { "path": "$HOME/.nightforge/*" }]

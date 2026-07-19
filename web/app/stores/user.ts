@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import type { Ref } from 'vue'
 import { computed, ref } from 'vue'
-import type { LoginCredentials, User } from '~/types'
+import type { LoginCredentials, SignupCredentials, User } from '~/types'
 import * as authService from '~/services/authService'
 
 /**
@@ -41,6 +41,31 @@ export const useUserStore = defineStore('user', () => {
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Échec de la connexion'
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
+  /**
+   * Register a new account and persist the session.
+   * @param credentials - Signup credentials.
+   * @returns Nothing.
+   * @throws If registration fails.
+   */
+  async function signup(credentials: SignupCredentials): Promise<void> {
+    try {
+      isLoading.value = true
+      error.value = null
+      const tokenResponse = await authService.register(credentials)
+      token.value = tokenResponse.access_token
+      user.value = await authService.getCurrentUser(token.value)
+      if (import.meta.client) {
+        localStorage.setItem('token', token.value)
+        localStorage.setItem('user', JSON.stringify(user.value))
+      }
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : "Échec de l'inscription"
       throw err
     } finally {
       isLoading.value = false
@@ -126,6 +151,7 @@ export const useUserStore = defineStore('user', () => {
     userName,
     userEmail,
     login,
+    signup,
     logout,
     initializeAuth,
     validateAuth,

@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import tempfile
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -12,6 +13,10 @@ AGENT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(AGENT_ROOT))
 
 from nightforge_agent import oauth_credentials  # noqa: E402
+from nightforge_agent.oauth_setup import (  # noqa: E402
+    is_nightforge_api_key_helper,
+    remove_nightforge_api_key_helper,
+)
 
 
 async def test_refresh_when_expired() -> None:
@@ -62,21 +67,41 @@ async def test_repair_spawned_when_no_refresh() -> None:
     print("OK test_repair_spawned_when_no_refresh")
 
 
-def test_api_key_helper_command() -> None:
-    from nightforge_agent.oauth_setup import (
-        OAUTH_TOKEN_FLAG,
-        api_key_helper_command,
-        oauth_helper_script_path,
+def test_detects_nightforge_api_key_helper() -> None:
+    assert is_nightforge_api_key_helper(
+        '"C:\\Users\\me\\AppData\\Local\\NightForge\\nightforge-agent.exe" --oauth-token'
+    )
+    assert is_nightforge_api_key_helper('"python" "nightforge_oauth_helper.py"')
+    assert not is_nightforge_api_key_helper('"python" "my_custom_helper.py"')
+    print("OK test_detects_nightforge_api_key_helper")
+
+
+def test_removes_nightforge_api_key_helper(tmp_path: Path) -> None:
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(
+        json.dumps(
+            {
+                "theme": "dark",
+                "apiKeyHelper": '"nightforge-agent.exe" --oauth-token',
+            }
+        ),
+        encoding="utf-8",
     )
 
-    assert oauth_helper_script_path().is_file()
-    command = api_key_helper_command()
-    assert "nightforge_oauth" in command or OAUTH_TOKEN_FLAG in command
-    print("OK test_api_key_helper_command")
+    with patch("nightforge_agent.oauth_setup.claude_config_dir", return_value=tmp_path):
+        removed = remove_nightforge_api_key_helper()
+
+    assert removed is True
+    saved = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "apiKeyHelper" not in saved
+    assert saved["theme"] == "dark"
+    print("OK test_removes_nightforge_api_key_helper")
 
 
 if __name__ == "__main__":
     asyncio.run(test_refresh_when_expired())
     asyncio.run(test_repair_spawned_when_no_refresh())
-    test_api_key_helper_command()
+    test_detects_nightforge_api_key_helper()
+    with tempfile.TemporaryDirectory() as tmp:
+        test_removes_nightforge_api_key_helper(Path(tmp))
     print("ALL OAUTH TESTS PASSED")

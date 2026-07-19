@@ -27,6 +27,9 @@ export function createMessage(
     content: string
     claude_session_id?: string | null
     claude_model?: string | null
+    provider?: string | null
+    effort?: string | null
+    fast_mode?: boolean
     source_item_ids?: number[]
     created_from?: string
   },
@@ -48,6 +51,9 @@ export function updateMessage(
     content?: string
     claude_session_id?: string | null
     claude_model?: string | null
+    provider?: string | null
+    effort?: string | null
+    fast_mode?: boolean
     source_item_ids?: number[]
   },
 ): Promise<ProjectMessage> {

@@ -23,6 +23,14 @@ class UserCreate(UserBase):
     password: str = Field(..., min_length=6, max_length=100)
 
 
+class UserRegister(BaseModel):
+    """Schema for public self-registration (role is always USER)."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr = Field(...)
+    password: str = Field(..., min_length=6, max_length=100)
+
+
 class UserResponse(UserBase):
     """Schema for user response."""
 

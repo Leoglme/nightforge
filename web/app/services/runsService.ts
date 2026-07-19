@@ -27,6 +27,8 @@ export function createRun(payload: {
   scheduled_at?: string | null
   window_end?: string | null
   wait_for_fresh_quota?: boolean
+  /** On-the-fly launch: only these queue item ids (ordered). */
+  queue_item_ids?: number[]
 }): Promise<Run> {
   return api.post<Run>('/api/v1/runs', payload)
 }
@@ -137,6 +139,9 @@ export function addRunMessage(
     content: string
     claude_session_id?: string | null
     claude_model?: string | null
+    provider?: string | null
+    effort?: string | null
+    fast_mode?: boolean
   },
 ): Promise<RunMessage> {
   return api.post<RunMessage>(`/api/v1/runs/${runId}/messages`, payload)

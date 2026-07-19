@@ -12,15 +12,32 @@ Agent -> server:
   {"type": "message.status", "message_id": 2, "status": "RUNNING|DONE|FAILED|SKIPPED", "error": null}
   {"type": "message.session", "message_id": 2, "claude_session_id": "uuid"}
   {"type": "sessions.response", "request_id": "...", "sessions": [...]}
+  {"type": "repo.inspect.response", "request_id": "...", "exists": true, "is_git": true, ...}
+  {"type": "ideas.expand.response", "request_id": "...", "items": [...], ...}
+  {"type": "claude.usage.response", "request_id": "...", "email": "...", "buckets": [...]}
+  {"type": "claude.session.export.response", "request_id": "...", "oauth": {...}, "email": "..."}
+  {"type": "claude.login.start.response", "request_id": "...", "login_id": "...", ...}
+  {"type": "claude.login.poll.response", "request_id": "...", "status": "...", ...}
+  {"type": "claude.login.complete.response", "request_id": "...", "status": "...", ...}
+  {"type": "claude.login.cancel.response", "request_id": "...", "status": "ok"}
 
 Server -> agent:
   {"type": "run.payload", "run": {...}}   # full run description (projects, paths, prompts)
   {"type": "run.update", "run": {...}}    # refresh quota budget / pending messages
   {"type": "run.stop", "run_id": 1}
   {"type": "sessions.list", "local_path": "C:\\...", "request_id": "..."}
+  {"type": "repo.inspect", "local_path": "C:\\...", "request_id": "..."}
+  {"type": "ideas.expand", "prompt": "...", "prefer_provider": "cursor", "request_id": "..."}
+  {"type": "claude.usage", "request_id": "..."}
+  {"type": "claude.session.export", "request_id": "..."}
+  {"type": "claude.login.start", "request_id": "..."}
+  {"type": "claude.login.poll", "login_id": "...", "request_id": "..."}
+  {"type": "claude.login.complete", "login_id": "...", "request_id": "..."}
+  {"type": "claude.login.cancel", "login_id": "...", "request_id": "..."}
 """
 from datetime import datetime, timezone
 from typing import Optional
+import logging
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from jose import JWTError, jwt
@@ -40,6 +57,7 @@ from services.auth_service import verify_password
 from services.queue_sync import sync_queue_items_for_run_message
 from services.run_dispatcher import dispatch_run
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ws", tags=["websocket"])
 
 
@@ -140,15 +158,23 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                 machine.last_seen_at = datetime.utcnow()
                 db.commit()
         elif msg_type == "quota":
-            db.add(
-                QuotaSnapshot(
-                    machine_id=machine_id,
-                    bucket=message.get("bucket", "five_hour"),
-                    utilization=float(message.get("utilization", 0.0)),
-                    resets_at=_parse_dt(message.get("resets_at")),
+            try:
+                db.add(
+                    QuotaSnapshot(
+                        machine_id=machine_id,
+                        bucket=message.get("bucket", "five_hour"),
+                        utilization=float(message.get("utilization", 0.0)),
+                        resets_at=_parse_dt(message.get("resets_at")),
+                    )
                 )
-            )
-            db.commit()
+                db.commit()
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                logger.warning(
+                    "Ignoring concurrent quota snapshot write for machine=%s",
+                    machine_id,
+                    exc_info=True,
+                )
         elif msg_type == "event":
             db.add(
                 RunEvent(
@@ -192,13 +218,58 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                     db.commit()
         elif msg_type == "sessions.response":
             agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "repo.inspect.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
         elif msg_type == "quota.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.usage.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.session.export.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.login.start.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.login.poll.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.login.complete.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "cursor.login.cancel.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.usage.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.session.export.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.login.start.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.login.poll.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.login.complete.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "claude.login.cancel.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "ideas.expand.response":
             agent_hub.resolve_request(message.get("request_id"), message)
     finally:
         db.close()
 
-    if msg_type not in ("sessions.response", "quota.response"):
-        # Relay to dashboards for live UI (session list responses stay server-side).
+    if msg_type not in (
+        "sessions.response",
+        "repo.inspect.response",
+        "quota.response",
+        "cursor.usage.response",
+        "cursor.session.export.response",
+        "cursor.login.start.response",
+        "cursor.login.poll.response",
+        "cursor.login.complete.response",
+        "cursor.login.cancel.response",
+        "claude.usage.response",
+        "claude.session.export.response",
+        "claude.login.start.response",
+        "claude.login.poll.response",
+        "claude.login.complete.response",
+        "claude.login.cancel.response",
+        "ideas.expand.response",
+    ):
+        # Relay to dashboards for live UI (correlated RPC responses stay server-side).
         await agent_hub.broadcast_dashboard({"machine_id": machine_id, **message})
 
 

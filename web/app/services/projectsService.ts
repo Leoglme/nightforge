@@ -19,7 +19,12 @@ export function listProjects(): Promise<Project[]> {
  * @param payload - Project fields.
  * @returns The created project.
  */
-export function createProject(payload: { name: string; github_repo?: string; base_branch?: string }): Promise<Project> {
+export function createProject(payload: {
+  name: string
+  github_repo?: string
+  base_branch?: string
+  push_to_main?: boolean
+}): Promise<Project> {
   return api.post<Project>('/api/v1/projects', payload)
 }
 

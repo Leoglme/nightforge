@@ -24,10 +24,12 @@
           </button>
 
           <span
-            v-if="icon"
+            v-if="icon || $slots.icon"
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--app-surface-2)]"
           >
-            <UIcon :name="icon" class="h-4 w-4 text-[var(--app-ink-soft)]" />
+            <slot name="icon">
+              <UIcon v-if="icon" :name="icon" class="h-4 w-4 text-[var(--app-ink-soft)]" />
+            </slot>
           </span>
 
           <div class="min-w-0 flex-1">
@@ -45,8 +47,8 @@
           </button>
         </div>
 
-        <!-- Body -->
-        <div class="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+        <!-- Body: overflow-visible so SelectMenu portals aren't clipped -->
+        <div class="min-h-0 flex-1 overflow-x-visible overflow-y-auto px-4 py-4 sm:px-5">
           <slot />
         </div>
 

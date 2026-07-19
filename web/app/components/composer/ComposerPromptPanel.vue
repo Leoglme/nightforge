@@ -1,6 +1,6 @@
 <template>
   <aside
-    class="flex w-full shrink-0 flex-col border-t border-[var(--app-line)] bg-[var(--app-surface)] lg:w-72 lg:border-t-0 lg:border-l"
+    class="flex h-full min-h-0 w-full shrink-0 flex-col border-t border-[var(--app-line)] bg-[var(--app-surface)] lg:w-72 lg:border-t-0 lg:border-l"
   >
     <div class="flex items-center justify-between border-b border-[var(--app-line)] px-3 py-2">
       <div class="min-w-0">
@@ -68,8 +68,14 @@
             <div class="min-w-0 flex-1">
               <StatusBadge v-if="item.status !== 'PENDING'" :status="item.status" class="mb-1" />
               <span
+                v-if="itemMeta(item)"
+                class="mb-1 inline-block rounded bg-[var(--app-surface-2)] px-1.5 py-0.5 text-[0.6rem] text-[var(--app-ink-soft)]"
+              >
+                {{ itemMeta(item) }}
+              </span>
+              <span
                 :class="[
-                  'text-xs leading-relaxed',
+                  'block text-xs leading-relaxed',
                   item.status === 'DONE' ? 'text-[var(--app-ink-soft)] line-through' : '',
                 ]"
               >
@@ -115,6 +121,8 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue'
+import type { AiProvider } from '~/constants/modelPresets'
+import { formatPromptMeta } from '~/constants/modelPresets'
 import type { QueueItem } from '~/types'
 
 /**
@@ -137,6 +145,18 @@ const emit = defineEmits<{
 }>()
 
 const newPrompt = ref('')
+
+/**
+ * Meta badge for a library item.
+ */
+function itemMeta(item: QueueItem): string {
+  return formatPromptMeta({
+    provider: item.provider as AiProvider | null,
+    model: item.model,
+    effort: item.effort,
+    fastMode: item.fast_mode,
+  })
+}
 
 /**
  * Emit an add-item event for the typed prompt, then reset the input.

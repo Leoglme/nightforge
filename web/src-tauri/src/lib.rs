@@ -32,6 +32,8 @@ struct AgentProcess {
     intentional_stop: Mutex<bool>,
     /// Blocks the watchdog respawn during desktop updates (even if intentional_stop races).
     block_respawn: Mutex<bool>,
+    /// App is quitting — never respawn the agent after this is set.
+    shutting_down: Mutex<bool>,
 }
 
 impl AgentProcess {
@@ -41,6 +43,7 @@ impl AgentProcess {
             last_error: Mutex::new(None),
             intentional_stop: Mutex::new(false),
             block_respawn: Mutex::new(false),
+            shutting_down: Mutex::new(false),
         }
     }
 
@@ -67,15 +70,31 @@ impl AgentProcess {
     fn block_respawn(&self) -> bool {
         *self.block_respawn.lock().unwrap()
     }
+
+    fn set_shutting_down(&self, value: bool) {
+        *self.shutting_down.lock().unwrap() = value;
+    }
+
+    fn shutting_down(&self) -> bool {
+        *self.shutting_down.lock().unwrap()
+    }
 }
 
 /// Spawn the bundled agent sidecar.
+///
+/// In `tauri:dev` (`cfg(dev)`), the Python agent is already started by
+/// `scripts/dev-desktop.mjs` — skip the sidecar to avoid a double agent / stub spawn.
 fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
+    if cfg!(dev) {
+        println!("NightForge agent sidecar skipped in tauri:dev (Python agent via concurrently)");
+        return Ok(());
+    }
+
     let state = app
         .try_state::<AgentProcess>()
         .ok_or_else(|| "Agent runtime not initialized".to_string())?;
 
-    if state.block_respawn() {
+    if state.block_respawn() || state.shutting_down() {
         return Ok(());
     }
 
@@ -101,10 +120,19 @@ fn spawn_agent(app: &tauri::AppHandle) -> Result<(), String> {
                             eprintln!("Agent sidecar exited: {payload:?}");
                             if let Some(state) = app_handle.try_state::<AgentProcess>() {
                                 state.child.lock().unwrap().take();
-                                if state.intentional_stop() || state.block_respawn() {
+                                if state.intentional_stop()
+                                    || state.block_respawn()
+                                    || state.shutting_down()
+                                {
                                     return;
                                 }
                                 thread::sleep(Duration::from_millis(800));
+                                if state.intentional_stop()
+                                    || state.block_respawn()
+                                    || state.shutting_down()
+                                {
+                                    return;
+                                }
                                 if let Err(err) = spawn_agent(&app_handle) {
                                     eprintln!("Agent sidecar respawn failed: {err}");
                                 }
@@ -176,13 +204,25 @@ fn kill_all_agent_processes() {
     thread::sleep(Duration::from_millis(1000));
 }
 
-/// Stop the sidecar and wait until Windows releases the executable (required before updates).
-fn stop_agent_sidecar_sync(state: &AgentProcess, for_update: bool) {
-    if for_update {
+/// How to stop the agent sidecar.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StopMode {
+    /// Temporary stop (restart will clear flags).
+    Soft,
+    /// Desktop update — block respawn until restart clears it.
+    Update,
+    /// App quitting — kill process tree and never respawn.
+    Shutdown,
+}
+
+/// Stop the sidecar. On Update/Shutdown, force-kill the process tree with taskkill /T.
+fn stop_agent_sidecar_sync(state: &AgentProcess, mode: StopMode) {
+    state.set_intentional_stop(true);
+    if mode == StopMode::Update || mode == StopMode::Shutdown {
         state.set_block_respawn(true);
-        state.set_intentional_stop(true);
-    } else {
-        state.set_intentional_stop(true);
+    }
+    if mode == StopMode::Shutdown {
+        state.set_shutting_down(true);
     }
 
     let child = state.child.lock().unwrap().take();
@@ -191,12 +231,15 @@ fn stop_agent_sidecar_sync(state: &AgentProcess, for_update: bool) {
         thread::sleep(Duration::from_millis(800));
     }
 
-    if for_update {
+    // Always kill the process tree on update/shutdown so orphans and children
+    // (claude, agent, …) cannot keep running after the UI is gone.
+    if mode == StopMode::Update || mode == StopMode::Shutdown {
         kill_all_agent_processes();
     }
 
     state.set_error(None);
-    if !for_update {
+    // Soft stop only: allow a later restart/spawn. Never clear flags on shutdown.
+    if mode == StopMode::Soft {
         state.set_intentional_stop(false);
     }
 }
@@ -207,7 +250,7 @@ fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
     let state = app
         .try_state::<AgentProcess>()
         .ok_or_else(|| "Agent runtime not initialized".to_string())?;
-    stop_agent_sidecar_sync(&state, false);
+    stop_agent_sidecar_sync(&state, StopMode::Soft);
     Ok(())
 }
 
@@ -215,7 +258,7 @@ fn stop_agent_sidecar(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn prepare_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
-        stop_agent_sidecar_sync(&state, true);
+        stop_agent_sidecar_sync(&state, StopMode::Update);
     } else {
         kill_all_agent_processes();
     }
@@ -233,9 +276,12 @@ fn prepare_desktop_update(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 fn restart_agent(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(state) = app.try_state::<AgentProcess>() {
+        if state.shutting_down() {
+            return Err("Application is shutting down".to_string());
+        }
         state.set_block_respawn(false);
         state.set_intentional_stop(false);
-        stop_agent_sidecar_sync(&state, false);
+        stop_agent_sidecar_sync(&state, StopMode::Soft);
     }
     spawn_agent(&app)
 }
@@ -284,6 +330,25 @@ fn agent_log_path() -> PathBuf {
     PathBuf::from(home).join(".nightforge").join("agent.log")
 }
 
+/// Open a native folder picker and return the absolute path (or null if cancelled).
+#[tauri::command]
+async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let folder = app
+            .dialog()
+            .file()
+            .set_title("Choisir le dossier du projet")
+            .blocking_pick_folder();
+        folder
+            .and_then(|path| path.into_path().ok())
+            .map(|path| path.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|err| err.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -292,13 +357,15 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AgentProcess::new())
         .invoke_handler(tauri::generate_handler![
             restart_agent,
             stop_agent_sidecar,
             prepare_desktop_update,
             agent_status,
-            agent_log_tail
+            agent_log_tail,
+            pick_project_folder
         ])
         .setup(|app| {
             if let Err(err) = spawn_agent(app.handle()) {
@@ -309,10 +376,21 @@ pub fn run() {
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<AgentProcess>() {
-                    stop_agent_sidecar_sync(&state, false);
+                    // Hard stop: kill process tree and block any watchdog respawn.
+                    stop_agent_sidecar_sync(&state, StopMode::Shutdown);
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while building tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            match event {
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
+                    if let Some(state) = app_handle.try_state::<AgentProcess>() {
+                        stop_agent_sidecar_sync(&state, StopMode::Shutdown);
+                    }
+                }
+                _ => {}
+            }
+        });
 }

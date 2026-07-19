@@ -10,6 +10,7 @@ from sqlalchemy.sql import func
 
 from core.database import Base
 from enums.run_status import RunStatus
+from enums.run_kind import RunKind
 
 if TYPE_CHECKING:
     from models.user import User
@@ -27,6 +28,7 @@ class Run(Base):
         user_id: Owner.
         machine_id: Target machine.
         status: Lifecycle status.
+        kind: ``night`` (Composer) or ``quick`` (file d'attente à la volée).
         quota_count: Number of 5-hour quotas the user allowed to burn.
         parallel: Whether selected projects run in parallel (else sequential).
         planned_timeline: Estimated per-quota start/reset timeline (JSON).
@@ -41,6 +43,7 @@ class Run(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     machine_id: Mapped[int] = mapped_column(ForeignKey("machines.id"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(20), default=RunStatus.SCHEDULED.value, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), default=RunKind.NIGHT.value, nullable=False)
     quota_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     parallel: Mapped[bool] = mapped_column(default=False, nullable=False)
     planned_timeline: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

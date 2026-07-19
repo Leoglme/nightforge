@@ -74,3 +74,26 @@ class QuotaSnapshotResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UsageBucket(BaseModel):
+    """One usage bar for the dashboard Utilisation card (account-level)."""
+
+    bucket: str
+    label: str
+    utilization: float
+    remaining: float = Field(..., description="1.0 - utilization, clamped")
+    resets_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class UsageSummaryResponse(BaseModel):
+    """Dashboard « Utilisation » — account-level (same Claude/Cursor across machines)."""
+
+    claude: List[UsageBucket] = Field(default_factory=list)
+    cursor: Optional[List[UsageBucket]] = Field(
+        default=None,
+        description="Cursor buckets when readable; null hides the section",
+    )
+    source: Optional[str] = Field(default=None, description="live | snapshot | none")
+    quota_auth_error: Optional[str] = None

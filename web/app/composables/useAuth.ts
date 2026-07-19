@@ -1,4 +1,4 @@
-import type { LoginCredentials } from '~/types'
+import type { LoginCredentials, SignupCredentials } from '~/types'
 
 /**
  * Composable for authentication operations.
@@ -24,6 +24,16 @@ export function useAuth() {
     }
   }
 
+  const signup = async (credentials: SignupCredentials): Promise<void> => {
+    try {
+      await userStore.signup(credentials)
+      router.push('/dashboard')
+    } catch (error) {
+      toast.add({ title: error instanceof Error ? error.message : "Échec de l'inscription", color: 'error' })
+      throw error
+    }
+  }
+
   const logout = (): void => {
     userStore.logout()
     router.push('/login')
@@ -31,6 +41,7 @@ export function useAuth() {
 
   return {
     login,
+    signup,
     logout,
     isAuthenticated: computed(() => userStore.isAuthenticated),
     isLoading: computed(() => userStore.isLoading),

@@ -5,16 +5,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from pathlib import Path
 
 from nightforge_agent.agent_singleton import acquire_singleton_or_exit
 from nightforge_agent.config import load_config
-from nightforge_agent.oauth_setup import ensure_api_key_helper_configured
+from nightforge_agent.oauth_setup import remove_nightforge_api_key_helper
 from nightforge_agent.worker import Worker
 
 
 def main() -> None:
     """Load the config (waiting for provisioning if needed) and start the worker loop."""
+    # NoDriver / Chrome need a Proactor loop on Windows (subprocess pipes).
+    if sys.platform.startswith("win"):
+        try:
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        except Exception:
+            pass
+
     acquire_singleton_or_exit()
     log_dir = Path.home() / ".nightforge"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -27,7 +35,7 @@ def main() -> None:
         ],
     )
     config = load_config(wait=True)
-    ensure_api_key_helper_configured()
+    remove_nightforge_api_key_helper()
     worker = Worker(config)
     try:
         asyncio.run(worker.start())

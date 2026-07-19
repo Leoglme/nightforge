@@ -12,6 +12,7 @@ from models.machine import Machine
 from models.user import User
 from schemas.claude_session import ClaudeSessionListResponse, ClaudeSessionResponse
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
+from schemas.repo_inspect import RepoInspectResponse
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user, get_password_hash
 from services.machine_cleanup import delete_machine_cascade
@@ -190,3 +191,59 @@ async def list_claude_sessions(
         for item in response.get("sessions", [])
     ]
     return ClaudeSessionListResponse(sessions=sessions)
+
+
+@router.get("/{machine_id}/inspect-repo", response_model=RepoInspectResponse)
+async def inspect_repo(
+    machine_id: int,
+    local_path: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Inspect a local git clone on a machine (folder name, GitHub remote, base branch).
+
+    Args:
+        machine_id: Target machine (must be online).
+        local_path: Absolute path of the clone on that PC.
+        current_user: The authenticated user.
+        db: Database session.
+
+    Returns:
+        Detected repo metadata.
+
+    Raises:
+        HTTPException: If the machine is unknown or offline.
+    """
+    machine = (
+        db.query(Machine)
+        .filter(Machine.id == machine_id, Machine.user_id == current_user.id)
+        .first()
+    )
+    if not machine:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
+
+    if not agent_hub.is_online(machine_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Machine offline — inspection requires the agent PC",
+        )
+
+    response = await agent_hub.request_agent(
+        machine_id,
+        {"type": "repo.inspect", "local_path": local_path},
+    )
+    if response is None:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Agent did not respond in time",
+        )
+
+    return RepoInspectResponse(
+        exists=bool(response.get("exists")),
+        is_git=bool(response.get("is_git")),
+        name=response.get("name"),
+        github_repo=response.get("github_repo"),
+        base_branch=response.get("base_branch"),
+        error=response.get("error"),
+    )

@@ -7,12 +7,13 @@
     "dashboard": "Tableau de bord",
     "projects": "Projets",
     "machines": "Machines",
-    "runs": "Nuits",
+    "runs": "Lancements",
     "compose": "Composer",
     "queue": "File d'attente",
     "plan": "Planificateur",
-    "docs": "Guide",
-    "logout": "Déconnexion"
+    "cursorAccounts": "Comptes Cursor",
+    "logout": "Déconnexion",
+    "back": "Retour"
   },
   "login": {
     "title": "Connexion",
@@ -20,9 +21,43 @@
     "password": "Mot de passe",
     "submit": "Se connecter"
   },
+  "auth": {
+    "fields": {
+      "name": "Nom",
+      "namePlaceholder": "Ton nom",
+      "email": "Email",
+      "emailPlaceholder": "toi{'@'}exemple.fr",
+      "password": "Mot de passe",
+      "passwordPlaceholder": "Ton mot de passe"
+    },
+    "login": {
+      "title": "Content de te revoir",
+      "subtitle": "Connecte-toi pour piloter tes nuits de forge.",
+      "submit": "Se connecter",
+      "submitting": "Connexion…",
+      "switchQuestion": "Pas encore de compte ?",
+      "switchCta": "Créer un compte"
+    },
+    "signup": {
+      "title": "Crée ton compte",
+      "subtitle": "Ton compte te donne accès au logiciel : télécharge l'app et lance tes nuits.",
+      "submit": "Créer mon compte",
+      "submitting": "Création…",
+      "switchQuestion": "Tu as déjà un compte ?",
+      "switchCta": "Se connecter",
+      "errorPasswordLength": "Le mot de passe doit contenir au moins 6 caractères."
+    },
+    "panel": {
+      "word1": "Compose",
+      "word2": "Forge",
+      "word3": "Livre",
+      "line": "NightForge pilote Claude Code et Cursor en autonomie — file d'attente de prompts, runs multi-machines — pendant que tu dors."
+    }
+  },
   "common": {
     "stop": "Arrêter",
     "night": "Nuit",
+    "launch": "Lancement",
     "machine": "Machine",
     "quotas": "Quotas",
     "mode": "Mode",
@@ -52,5 +87,54 @@
   "errors": {
     "loginFailed": "Échec de la connexion",
     "userFailed": "Impossible de récupérer l'utilisateur"
+  },
+  "runs": {
+    "chat": {
+      "you": "Toi",
+      "claude": "Claude Code",
+      "cursor": "Cursor",
+      "retry": "Relancer",
+      "waiting": "En attente dans la file…",
+      "thinking": "En cours…",
+      "done": "Terminé.",
+      "failed": "Échec de l'exécution.",
+      "quotaPlan": "Quotas",
+      "freshAt": "vierge",
+      "emptyTitle": "Aucun message pour l'instant",
+      "emptyHint": "Envoie un prompt ci-dessous pour démarrer la conversation.",
+      "project": "Projet",
+      "placeholder": "Décrivez une tâche ou posez une question.",
+      "send": "Envoyer",
+      "sent": "Message envoyé",
+      "sendFailed": "Impossible d'envoyer le message",
+      "effort": "Effort",
+      "effortTitle": "Effort {level}",
+      "faster": "Plus rapide",
+      "smarter": "Plus intelligent",
+      "fastMode": "Mode rapide",
+      "enableFast": "Activer le mode rapide",
+      "effortLevels": {
+        "low": "Low",
+        "medium": "Medium",
+        "high": "Élevé",
+        "xhigh": "Extra",
+        "max": "Max"
+      }
+    }
+  },
+  "compose": {
+    "messageN": "Message {n}",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "continue": "Vas-y continue",
+    "emptyTitle": "Aucun message pour ce projet",
+    "emptyHint": "Écris ci-dessous ou pioche des prompts dans la bibliothèque.",
+    "placeholder": "Écris le prochain message…",
+    "placeholderContinue": "Optionnel — laisse vide pour « Vas-y, continue »",
+    "hintAdd": "Ajoute pour empiler le message",
+    "hintSession": "Reprise de session activée",
+    "hintPicks": "{n} prompt(s) dans le brouillon",
+    "sessionNew": "Session",
+    "sessionShort": "{id}…"
   }
 }

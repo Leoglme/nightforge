@@ -4,16 +4,26 @@
 
     <UCard>
       <div v-if="runs.length === 0" class="py-6 text-center text-sm text-[var(--app-ink-soft)]">
-        Aucune nuit planifiée. Compose la tienne depuis le
+        Aucun lancement pour l’instant. Lance un prompt depuis la
+        <NuxtLink to="/dashboard/queue" class="underline">file d’attente</NuxtLink>
+        ou compose une nuit dans le
         <NuxtLink to="/dashboard/compose" class="underline">compositeur</NuxtLink>.
       </div>
       <ul v-else class="divide-y divide-[var(--app-line)]">
         <li v-for="run in runs" :key="run.id" class="flex items-center justify-between gap-3 py-3 text-sm">
           <NuxtLink :to="`/dashboard/runs/${run.id}`" class="min-w-0 flex-1 hover:opacity-80">
-            <div class="font-medium">{{ t('common.night') }} #{{ run.id }}</div>
+            <div class="font-medium">
+              {{ run.kind === 'quick' ? t('common.launch') : t('common.night') }} #{{ run.id }}
+            </div>
             <div class="text-xs text-[var(--app-ink-soft)]">
-              {{ t('common.machine') }} {{ run.machine_id }} · {{ run.quota_count }} quota(s) ·
-              {{ run.parallel ? t('common.parallel').toLowerCase() : t('common.sequential').toLowerCase() }}
+              <template v-if="run.kind === 'quick'">
+                {{ t('common.machine') }} {{ machineLabel(run.machine_id) }}
+                <template v-if="run.started_at"> · {{ formatDateTimeFr(run.started_at) }}</template>
+              </template>
+              <template v-else>
+                {{ t('common.machine') }} {{ machineLabel(run.machine_id) }} · {{ run.quota_count }} quota(s) ·
+                {{ run.parallel ? t('common.parallel').toLowerCase() : t('common.sequential').toLowerCase() }}
+              </template>
             </div>
           </NuxtLink>
           <div class="flex items-center gap-2">
@@ -43,39 +53,38 @@
 
 <script lang="ts" setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Run } from '~/types'
+import type { Machine, Run } from '~/types'
+import { formatDateTimeFr } from '~/utils/datetime'
+import { listMachines } from '~/services/machinesService'
 import { listRuns, stopRun } from '~/services/runsService'
 
 /**
- * Runs list with the kill switch and live refresh.
+ * Runs list — nights and quick launches.
  */
 definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const { t } = useI18n()
 const runs = ref<Run[]>([])
+const machines = ref<Machine[]>([])
 let timer: ReturnType<typeof setInterval> | null = null
 
-/**
- * Refresh the runs list.
- * @returns Nothing.
- */
+function machineLabel(machineId: number): string {
+  return machines.value.find((m) => m.id === machineId)?.name ?? `#${machineId}`
+}
+
 async function refresh(): Promise<void> {
   runs.value = await listRuns().catch(() => [])
 }
 
-/**
- * Stop a run.
- * @param id - Run id.
- * @returns Nothing.
- */
 async function stop(id: number): Promise<void> {
   await stopRun(id)
   await refresh()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  machines.value = await listMachines().catch(() => [])
   refresh()
-  timer = setInterval(refresh, 5000)
+  timer = setInterval(refresh, 12000)
 })
 
 onBeforeUnmount(() => {

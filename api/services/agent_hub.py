@@ -76,8 +76,17 @@ class AgentHub:
         ws = self._agents.get(machine_id)
         if ws is None:
             return False
-        await ws.send_json(message)
-        return True
+        try:
+            await ws.send_json(message)
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to send to agent machine=%s: %s — unregistering",
+                machine_id,
+                exc,
+            )
+            await self.unregister_agent(machine_id)
+            return False
 
     async def request_agent(
         self, machine_id: int, message: dict, timeout: float = 15.0
