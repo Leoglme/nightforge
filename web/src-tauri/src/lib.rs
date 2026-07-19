@@ -15,6 +15,11 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::Manager;
+#[cfg(desktop)]
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
 
@@ -384,6 +389,58 @@ async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, St
     .map_err(|err| err.to_string())
 }
 
+/// Show and focus the main desktop window (used by tray click / menu).
+#[cfg(desktop)]
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+/// System tray: left-click opens the window; right-click menu has Quit for a real exit.
+#[cfg(desktop)]
+fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, "show", "Ouvrir", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", "Quitter", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id("nightforge-tray")
+        .menu(&menu)
+        .tooltip("NightForge")
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main_window(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            match event {
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    button_state: MouseButtonState::Up,
+                    ..
+                }
+                | TrayIconEvent::DoubleClick {
+                    button: MouseButton::Left,
+                    ..
+                } => {
+                    show_main_window(tray.app_handle());
+                }
+                _ => {}
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    // Kept alive by the app resource table after build.
+    let _tray = builder.build(app)?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -403,18 +460,28 @@ pub fn run() {
             pick_project_folder
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            setup_system_tray(app)?;
+
             if let Err(err) = spawn_agent(app.handle()) {
                 eprintln!("Initial agent spawn failed: {err}");
             }
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
+        .on_window_event(|window, event| match event {
+            // Close button hides to tray instead of quitting; agent keeps running.
+            #[cfg(desktop)]
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            // Real quit (tray → Quitter / app.exit) destroys the window and stops the agent.
+            tauri::WindowEvent::Destroyed => {
                 if let Some(state) = window.app_handle().try_state::<AgentProcess>() {
-                    // Hard stop: kill process tree and block any watchdog respawn.
                     stop_agent_sidecar_sync(&state, StopMode::Shutdown);
                 }
             }
+            _ => {}
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
