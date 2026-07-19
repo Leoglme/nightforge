@@ -1,55 +1,104 @@
 """
 Ideas expander — turn free-form keywords into queue-ready prompts.
 
-Primary path: ask an online agent (Cursor Composer 2.5 preferred, Claude Haiku fallback).
-Fallback: heuristic split + model heuristics inspired by the ``plan-de-session`` skill.
+Order: online agent (Cursor/Claude) → Groq cloud LLM → local heuristic.
+Planning rules are adapted from the NightForge ``plan-de-session`` skill.
 """
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any, List, Optional, Tuple
 
+import httpx
+
+from core.config import settings
 from schemas.ideas import ExpandedIdeaDraft
 
-# Keywords → (provider, model, effort) — mirrors plan-de-session + Cursor preference.
+logger = logging.getLogger(__name__)
+
+# Keywords → (provider, model, effort) — mirrors plan-de-session + NightForge providers.
 _AESTHETIC = re.compile(
-    r"\b(beau|esth|design|animat|fluide|visuel|style|polish|ui\b|ux\b|drawer|ressenti|"
-    r"harmonie|maquette|look|couleur|palette)\b",
+    r"\b(beau|esth|design|animat|fluide|visuel|style|polish|ressenti|"
+    r"harmonie|look|couleur|palette|drawer|satisfaisant|agréable)\b",
+    re.IGNORECASE,
+)
+_MOCKUP = re.compile(
+    r"\b(maquette|pixel.?perfect|à l['']identique|comme la maquette|figma|pencil)\b",
     re.IGNORECASE,
 )
 _COMPLEX = re.compile(
-    r"\b(archi|refacto|refactor|review|complex|raisonn|opuss?|profond|algo)\b",
+    r"\b(archi|refacto|refactor|review|complex|raisonn|opuss?|profond|algo|"
+    r"multi.?fichier|migration)\b",
+    re.IGNORECASE,
+)
+_LOGIC = re.compile(
+    r"\b(logique|comportement|état|state|hover|timing|délai|delay|conditionnel|"
+    r"interaction|bug|fix)\b",
     re.IGNORECASE,
 )
 _MECHANICAL = re.compile(
-    r"\b(fix|bug|typo|label|renomm|déplac|deplac|retir|ajout|texte|seo|meta|"
-    r"posthog|contenu|copie|copier|rename|move|delete|add)\b",
+    r"\b(typo|label|renomm|déplac|deplac|retir|ajout|texte|seo|meta|"
+    r"posthog|contenu|copie|copier|rename|move|delete|add|sitemap|json.?ld)\b",
     re.IGNORECASE,
 )
 
+_JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_JSON_OBJECT = re.compile(r"\{[\s\S]*\}")
+
+# Condensed plan-de-session for NightForge (Cursor + Claude). Same text for agent & Groq.
 PLAN_SYSTEM = """Tu es le skill « plan-de-session » de NightForge.
 Tu NE codes PAS. Tu découpes des idées en prompts prêts pour une file d'attente.
 
-Objectif : minimiser la conso de tokens / quota.
+Objectif : minimiser la conso de tokens / quota, tout en choisissant le MEILLEUR
+modèle disponible (Cursor OU Claude) pour chaque bloc — pas le plus cher par défaut,
+pas non plus Composer partout.
 
-Règles de modèle (préférer le moins cher qui convient) :
-- Tâche mécanique / fix / contenu / SEO / setup → provider=cursor, model=composer-2.5, effort=null, fast_mode=false
-- Logique / comportement / review légère → provider=cursor, model=composer-2.5 (ou claude/sonnet si raisonnement requis), effort=medium|high
-- Esthétique / ressenti / polish UI lourd → provider=claude, model=fable, effort=xhigh
-- Archi profonde / raisonnement dur → provider=claude, model=opus, effort=high
-- Entre Sonnet et Fable : ressenti visuel → Fable ; le reste → Sonnet ou Composer
+## Principe
+Découpe par NATURE de tâche (pas par page). Une même page peut donner plusieurs
+sessions. Ne mélange JAMAIS esthétique Fable et logique / mécanique dans le même prompt.
 
-Découpe par NATURE de tâche (pas par page). Ne mélange jamais esthétique Fable et logique Sonnet.
+## Classification → provider / model / effort
 
-Réponds UNIQUEMENT avec un JSON valide (pas de markdown) :
+| Catégorie | Signaux | provider | model | effort | fast_mode |
+|-----------|---------|----------|-------|--------|-----------|
+| Mécanique / structurel / contenu / SEO / setup / PostHog | label, déplacer, typo, meta, pages légales | cursor | composer-2.5 | null | false |
+| Logique / comportement simple | hover, état, bug d'interaction, timing | cursor | composer-2.5 | null | false |
+| Logique tordue / raisonnement | état complexe, multi-fichiers subtil | claude | sonnet | high | false |
+| Matcher une maquette | « comme la maquette », pixel-perfect | claude | sonnet | medium | false |
+| Esthétique / ressenti / polish UI lourd | plus beau, fluide, harmonie, drawer, animation | claude | fable | xhigh | false |
+| Visuel transverse | palette, style bouton global | claude | fable | xhigh | false |
+| Archi / review profonde | refacto large, archi, raisonnement dur | claude | opus | high | false |
+| Raisonnement Cursor (si tu préfères rester Cursor) | review légère | cursor | grok-4.5 | high | false |
+
+Règle d'or Sonnet vs Fable : goût / ressenti visuel → Fable ; le reste → Sonnet ou Composer.
+Règle d'or Cursor vs Claude : Composer pour le pas cher / mécanique ; Claude (sonnet/fable/opus)
+quand la qualité ou le goût compte vraiment. Ne mets pas Fable sur Cursor sauf si tu as une
+raison forte — préfère provider=claude, model=fable.
+
+## Regroupement
+- Un bloc cohérent (même composant / même sujet) = une session.
+- Regroupe plusieurs petites corrections mécaniques du MÊME fichier si le contexte reste petit.
+- Sessions Fable courtes. Ne mets pas 8 corrections d'une grosse page dans un seul prompt.
+- Ordonne : visuel transverse → corrections composants → pages dépendantes → non-visuel (SEO…).
+
+## Format de chaque prompt
+- Commence par `Contexte :` (projet + fichiers @mention placeholders si chemins inconnus).
+- Liste numérotée claire, sans inventer de comportement.
+- Précise le périmètre (« ne touche pas au style » / « uniquement l'animation »).
+- Sur un bloc Fable esthétique lourd, ajoute une ligne : « active le skill ui-ux-pro-max si dispo ».
+
+## Sortie
+Réponds UNIQUEMENT avec un JSON valide (pas de markdown, pas de fences) :
 {
-  "summary": "N sessions — …",
+  "summary": "N sessions — … (répartition Cursor/Claude)",
   "items": [
     {
       "title": "titre court",
-      "prompt": "prompt complet prêt à coller (Contexte + points numérotés)",
+      "prompt": "prompt complet prêt à coller",
       "provider": "cursor" | "claude",
-      "model": "composer-2.5" | "sonnet" | "opus" | "fable" | "haiku" | "grok-4.5",
+      "model": "composer-2.5" | "grok-4.5" | "sonnet" | "opus" | "fable" | "haiku",
       "effort": "low" | "medium" | "high" | "xhigh" | "max" | null,
       "fast_mode": false
     }
@@ -60,7 +109,7 @@ Réponds UNIQUEMENT avec un JSON valide (pas de markdown) :
 
 def build_agent_prompt(*, ideas: str, project_name: str) -> str:
     """
-    Build the planning prompt sent to Cursor / Claude on the agent.
+    Build the planning prompt sent to Cursor / Claude on the agent (or Groq).
 
     Args:
         ideas: Raw user ideas / keywords.
@@ -110,13 +159,16 @@ def _classify(chunk: str) -> Tuple[str, str, Optional[str], bool]:
     Returns:
         (provider, model, effort, fast_mode)
     """
+    if _MOCKUP.search(chunk) and not _AESTHETIC.search(chunk):
+        return "claude", "sonnet", "medium", False
     if _AESTHETIC.search(chunk):
         return "claude", "fable", "xhigh", False
     if _COMPLEX.search(chunk):
         return "claude", "opus", "high", False
+    if _LOGIC.search(chunk):
+        return "cursor", "composer-2.5", None, False
     if _MECHANICAL.search(chunk):
         return "cursor", "composer-2.5", None, False
-    # Default: cheapest Cursor model
     return "cursor", "composer-2.5", None, False
 
 
@@ -144,7 +196,7 @@ def _prompt_from_chunk(chunk: str, project_name: str) -> str:
 
 def heuristic_expand(*, ideas: str, project_name: str) -> Tuple[str, List[ExpandedIdeaDraft]]:
     """
-    Expand ideas without an LLM (offline / agent unavailable).
+    Expand ideas without an LLM (offline / agent and Groq unavailable).
 
     Args:
         ideas: Raw text.
@@ -173,12 +225,43 @@ def heuristic_expand(*, ideas: str, project_name: str) -> Tuple[str, List[Expand
     return summary, drafts
 
 
-def drafts_from_agent_payload(payload: dict[str, Any]) -> Tuple[Optional[str], List[ExpandedIdeaDraft]]:
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
     """
-    Parse an agent ``ideas.expand.response`` payload into drafts.
+    Best-effort extract of a JSON object from model output.
 
     Args:
-        payload: Agent JSON response.
+        text: Raw model text.
+
+    Returns:
+        Parsed dict, or None.
+    """
+    if not text:
+        return None
+
+    candidates: List[str] = []
+    fence = _JSON_FENCE.search(text)
+    if fence:
+        candidates.append(fence.group(1))
+    match = _JSON_OBJECT.search(text)
+    if match:
+        candidates.append(match.group(0))
+
+    for raw in candidates:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return data
+    return None
+
+
+def drafts_from_agent_payload(payload: dict[str, Any]) -> Tuple[Optional[str], List[ExpandedIdeaDraft]]:
+    """
+    Parse an agent / Groq JSON payload into drafts.
+
+    Args:
+        payload: Response dict with optional summary + items.
 
     Returns:
         (summary, drafts)
@@ -214,3 +297,69 @@ def drafts_from_agent_payload(payload: dict[str, Any]) -> Tuple[Optional[str], L
             )
         )
     return summary, drafts
+
+
+async def expand_via_groq(
+    *, ideas: str, project_name: str
+) -> Tuple[Optional[str], List[ExpandedIdeaDraft], Optional[str]]:
+    """
+    Expand ideas via Groq Chat Completions (cloud fallback when agent is offline).
+
+    Args:
+        ideas: Raw user ideas.
+        project_name: Target project name.
+
+    Returns:
+        (summary, drafts, model_id) — empty drafts if Groq unavailable or parse failed.
+    """
+    api_key = (settings.groq_api_key or "").strip()
+    if not api_key:
+        return None, [], None
+
+    model = (settings.groq_model or "llama-3.3-70b-versatile").strip()
+    user_prompt = build_agent_prompt(ideas=ideas, project_name=project_name)
+
+    try:
+        async with httpx.AsyncClient(timeout=90.0) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model,
+                    "temperature": 0.2,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Tu planifies des prompts pour une file NightForge. "
+                                "Réponds uniquement en JSON valide selon le schéma demandé."
+                            ),
+                        },
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+        response.raise_for_status()
+        body = response.json()
+        content = (
+            body.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        if not isinstance(content, str):
+            content = str(content or "")
+    except Exception as exc:  # noqa: BLE001 — soft fallback to heuristic
+        logger.warning("Groq ideas.expand failed: %s", exc)
+        return None, [], None
+
+    parsed = _extract_json_object(content)
+    if not parsed:
+        logger.warning("Groq ideas.expand: could not parse JSON from response")
+        return None, [], None
+
+    summary, drafts = drafts_from_agent_payload(parsed)
+    return summary, drafts, model

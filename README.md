@@ -1,142 +1,159 @@
-# NightForge
+<p align="center">
+  <img src="docs/images/nightforge-logo.svg" alt="NightForge" width="220" />
+</p>
 
-**Autonomous overnight worker manager for Claude Code & Cursor Agent**
+<h1 align="center">NightForge</h1>
 
-NightForge makes Claude Code (and Cursor Agent) work on their own while you sleep or are
-away. Queue prompts per project with the provider, model and effort you want, pick which of
-your machines runs the job, and let it drain the queue prompt by prompt — automatically
-resuming after each Claude Max 5-hour quota reset, committing regularly, and pushing a
-dedicated branch to GitHub. A quota planner tells you, before you launch, when each Claude
-quota will run and when a fresh one will be free again. Everything is drivable from any
-device — desktop app or phone browser — **without a VPN**, because the machines connect out
-to your VPS.
+<p align="center">
+  <strong>Gestionnaire autonome de workers IA pour Claude Code &amp; Cursor Agent</strong><br />
+  Lance des prompts sur tes projets pendant que tu dors — depuis ton téléphone, sans VPN.
+</p>
 
-> **Project status:** V2. Multi-provider (Claude Code + Cursor Agent), prompt notebook with
-> on-the-fly launches, agent lifecycle tied to the desktop app. Spec:
-> [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md), conventions:
-> [`docs/STANDARDS_CODE_ET_ARCHITECTURE.md`](./docs/STANDARDS_CODE_ET_ARCHITECTURE.md),
-> checklist: [`docs/V2_PLAN.md`](./docs/V2_PLAN.md).
+<p align="center">
+  <a href="#fonctionnalités">Fonctionnalités</a> ·
+  <a href="#comment-ça-marche">Architecture</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#développement">Développement</a>
+</p>
 
-## How it works
+---
 
-Three cooperating pieces (only the **agent** is new versus a classic web app):
+NightForge fait tourner **Claude Code** et **Cursor Agent** en autonomie sur tes machines. Tu files une file de prompts par projet (provider, modèle, effort), tu choisis quelle machine exécute quoi, et l'agent enchaîne les tâches — en reprenant automatiquement après chaque reset de quota, en commitant régulièrement et en poussant sur Git. Tout est pilotable depuis **n'importe quel appareil** (app desktop ou navigateur mobile) : démarre tes PCs, ouvre NightForge, puis contrôle tout depuis ton téléphone.
 
-- **Control-plane** (on the VPS) — the only publicly reachable component. Holds projects,
-  queues, runs, logs and machine registry; serves the web UI for your phone.
-- **Agent** (on each PC) — opens an **outbound** WebSocket to the VPS (no inbound ports),
-  spawns `claude` or Cursor `agent` locally, watches the Claude quota, commits & pushes.
-  **Started with the Tauri desktop app and stopped when you close it** — nothing runs in
-  the background when NightForge is closed.
-- **UI** (web + desktop) — one Nuxt app, served on the VPS for the browser/phone and packaged
-  as a Tauri desktop app for each PC.
+> **Statut du projet :** V2 — multi-provider, multi-comptes, multi-machines, review de code intégrée.  
+> Spec : [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) · Conventions : [`docs/STANDARDS_CODE_ET_ARCHITECTURE.md`](./docs/STANDARDS_CODE_ET_ARCHITECTURE.md) · Checklist : [`docs/V2_PLAN.md`](./docs/V2_PLAN.md)
+
+## Aperçu
+
+| Tableau de bord | Comptes Cursor |
+|:---:|:---:|
+| ![Tableau de bord — quotas Claude & Cursor](docs/images/dashboard.png) | ![Comptes Cursor — quotas par compte](docs/images/cursor-accounts.png) |
+
+| File d'attente | Composer |
+|:---:|:---:|
+| ![File d'attente — carnet de prompts](docs/images/queue.png) | ![Composer — session de nuit](docs/images/composer.png) |
+
+| Lancement | Review de code |
+|:---:|:---:|
+| ![Lancement — exécution en direct](docs/images/run.png) | ![Review — diff des fichiers modifiés](docs/images/code-review.png) |
+
+## Fonctionnalités
+
+### Multi-provider : Claude Code & Cursor Agent
+
+Chaque prompt peut cibler **Claude Code** ou **Cursor Agent**. Tu choisis le **modèle** (Sonnet, Opus, Fable, Grok 4.5, Composer 2.5…), le niveau d'**effort** (low → max, Extra = `xhigh` quand supporté) et le mode **Fast** (utile surtout pour Composer 2.5). Les valeurs par défaut quotidiennes sont pré-remplies (Sonnet→max, Opus→high, Fable→extra, Grok 4.5→high).
+
+### Multi-comptes & switch automatique
+
+- **Comptes Claude** (`/dashboard/claude-accounts`) — ajoute autant de comptes Claude Max que tu veux, consulte les quotas (fenêtre 5 h, hebdo…) et laisse l'agent **basculer automatiquement** vers le compte le moins chargé quand un quota est plein.
+- **Comptes Cursor** (`/dashboard/cursor-accounts`) — même principe : vault chiffré (Fernet / `ENCRYPTION_KEY`), connexion via navigateur (`agent login`), tokens en mode Avancé. Avant chaque prompt Cursor, l'agent choisit le compte à **moyenne Auto+API la plus basse**.
+
+Le tableau de bord affiche l'utilisation agrégée de tous tes comptes (barres Claude Max + Cursor) avec les dates de reset.
+
+### Multi-machines & exécution parallèle
+
+Enregistre **autant de machines que tu veux** (un clic depuis l'app desktop Tauri). Lance des prompts **en parallèle sur plusieurs PCs** — chaque machine exécute son propre agent via une connexion WebSocket sortante vers ton VPS (pas de ports entrants, pas de VPN).
+
+### Projets : path local & détection Git auto
+
+Pour ajouter un projet, colle simplement le **chemin du clone local** sur la machine. NightForge détecte automatiquement le nom du dossier, le remote GitHub et la branche de base via l'agent. Tu peux ensuite choisir :
+
+| Option | Comportement |
+|--------|--------------|
+| **Push sur `main` activé** (défaut) | L'IA commit et push directement sur `main`. |
+| **Push sur `main` désactivé** | NightForge crée une branche versionnée `night/YYYY-MM-DD` ; tu review et push toi-même. |
+
+Le push automatique par l'IA est activable/désactivable à tout moment dans les réglages du projet.
+
+### File d'attente — carnet de prompts
+
+La **File d'attente** est un carnet de prompts réutilisables : note tes idées pendant qu'un autre run tourne, copie-les au presse-papier, ou lance-les à la volée. Chaque entrée peut spécifier provider, modèle, effort, fast et la machine cible.
+
+**Aide prompts IA** (bouton **Aide IA** dans la file) : colle un pavé d'idées ou des mots-clés — NightForge les découpe (règles plan-de-session), rédige les prompts et choisit le meilleur modèle **Cursor ou Claude** pour chaque item. Ordre : machine agent en ligne → **Groq** (si `GROQ_API_KEY`) → heuristique locale.
+
+### Composer — sessions de nuit
+
+Le **Composer** permet de construire une séquence multi-messages par projet, avec la **bibliothèque de prompts** réutilisables, le planificateur de quotas Claude Max et le lancement d'une **nuit** complète.
+
+### Review de code intégrée
+
+Pendant et après chaque lancement, NightForge affiche les **fichiers modifiés** avec le décompte `+/-` lignes. Ouvre la feuille de review pour parcourir chaque diff — idéal pour valider le travail de l'IA avant de merger ou de push.
+
+### Contrôle à distance
+
+Démarre tes machines, lance l'app desktop (qui démarre l'agent local), puis **pilote tout depuis ton téléphone** via le navigateur : ajouter des prompts, lancer la file d'attente, composer une nuit, suivre les logs en direct. Les machines se connectent **en sortie** vers ton VPS — aucun VPN requis.
+
+## Comment ça marche
+
+Trois briques coopèrent (seul l'**agent** est nouveau par rapport à une web app classique) :
+
+| Composant | Rôle |
+|-----------|------|
+| **Control-plane** (VPS) | Seul composant public. Projets, files, runs, logs, registre des machines ; sert l'UI web pour le téléphone. |
+| **Agent** (chaque PC) | WebSocket **sortant** vers le VPS, spawn `claude` ou `agent` localement, surveille les quotas, commit & push. **Démarré avec l'app Tauri, arrêté à la fermeture** — rien ne tourne en arrière-plan quand NightForge est fermé. |
+| **UI** (web + desktop) | Une app Nuxt, servie sur le VPS (navigateur/téléphone) et packagée en app Tauri desktop par PC. |
 
 ```mermaid
 graph TD
-  Phone["Phone (web)"] -->|HTTPS| CP
-  Desktop["Tauri app (per PC)"] -->|HTTPS| CP
+  Phone["Téléphone (web)"] -->|HTTPS| CP
+  Desktop["App Tauri (par PC)"] -->|HTTPS| CP
   CP["Control-plane<br/>FastAPI + MariaDB + WS<br/>(VPS)"]
-  CP <-->|outbound WS + token| Agent["Agent (per PC)"]
+  CP <-->|WS sortant + token| Agent["Agent (par PC)"]
   Agent -->|spawn| Claude["claude -p --model --effort"]
   Agent -->|spawn| Cursor["agent -p --force --trust"]
   Agent -->|commit / push| GH["GitHub"]
 ```
 
-### Prompt notebook (File d'attente)
+### Deux modes de lancement
 
-The queue is a **prompt notebook**: jot ideas while another run is busy. Create a
-project from the project picker by pasting the **local git clone path** on your machine
-(folder name + GitHub remote are detected via the agent when online). By default
-**push to main** is enabled (no `night/YYYY-MM-DD` branch); turn it off in project
-settings to keep the night-branch workflow. Each entry can optionally specify:
+| Mode | Où | Ce que tu obtiens |
+|------|-----|-------------------|
+| **Lancement rapide** (`kind=quick`) | File d'attente → play / sélection | UI légère : machine, prompts, logs — sans planificateur de quotas |
+| **Nuit** (`kind=night`) | Composer | Session complète : séquence multi-messages, timeline quotas, budget |
 
-- **Provider** — Claude Code or Cursor
-- **Model** — Sonnet / Opus / Fable / Grok 4.5 / Composer 2.5 / …
-- **Effort** — low → max (Extra = `xhigh`), when the model supports it
-- **Fast** — off by default (Composer 2.5 only needs this toggle)
+### Planificateur de quotas (Claude Max)
 
-Daily defaults are pre-filled (Sonnet→max, Opus→high, Fable→extra, Grok 4.5→high).
-
-**Aide prompts IA** (queue → **Aide IA**): paste free-form ideas / keywords;
-NightForge splits them into ready prompts. When a machine is online it uses **Composer 2.5**,
-falling back to **Claude Haiku** if Cursor is unavailable; otherwise a local heuristic.
-Provider/model are pre-filled on each queue item.
-
-**Two ways to run prompts:**
-
-| Mode | Where | What you get |
-|------|--------|--------------|
-| **Lancement** (`kind=quick`) | File d'attente → play / sélection | Lightweight UI: machine, prompts, logs — no night quota planner |
-| **Nuit** (`kind=night`) | Composer | Full overnight session: multi-message sequence, quota timeline, budget |
-
-Copy a prompt to the clipboard when you are at the machine, launch one or many from the
-queue while present, or compose a full night when you step away.
-
-### The quota planner (Claude Max)
-
-Before you sleep, pick a **machine**, one or more **projects**, and a **number of quotas**.
-NightForge estimates a timeline, e.g. launching at 23:00 with 2 quotas:
-
-- Quota 1: started **23:00** → resets **~04:00**
-- Quota 2: started **~04:00** → resets **~09:00**
-- **Fresh quota available: ~09:00**
-
-Claude Max uses a **rolling** 5-hour window, so quota 2/3 times are estimates and are
-**re-anchored live**. Cursor messages in a mixed run do **not** consume this Claude planner.
-Quick launches skip the planner UI (they still run through the same agent).
-
-### Dashboard — Utilisation
-
-The dashboard shows **account-level** remaining quotas (same Claude / Cursor login across
-machines): Claude Max **5 h** + **weekly** buckets when available, and Cursor plan bars
-(Composer/Auto, other models) when the desktop agent can read the local Cursor session.
-If Cursor usage cannot be read, that section is hidden.
-
-### Multi-comptes Cursor
-
-Page **Comptes Cursor** (`/dashboard/cursor-accounts`) — vault chiffré (Fernet /
-`ENCRYPTION_KEY`) : email + mot de passe (rappel), connexion via navigateur par défaut
-(`agent login` / session IDE), tokens en mode **Avancé**. Refresh re-fetch tous les
-comptes. Avant chaque prompt Cursor, l’agent choisit le compte à moyenne Auto+API la
-plus basse.
+Avant de partir dormir, choisis une **machine**, un ou plusieurs **projets** et un **nombre de quotas**. NightForge estime une timeline (ex. lancement à 23h avec 2 quotas : quota 1 ~04h, quota 2 ~09h). Claude Max utilise une fenêtre glissante de 5 h — les estimations sont **ré-ancrées en direct**. Les messages Cursor dans un run mixte ne consomment pas ce planificateur Claude.
 
 ## Architecture
 
 ```
 .
-├── api/     # FastAPI control-plane (projects, queues, runs, quota, WebSocket) + MariaDB
-├── web/     # Nuxt 4 dashboard — Tauri 2 desktop shell (web + phone + desktop, one UI)
-├── agent/   # Python agent — runs on each PC, drives Claude Code / Cursor Agent locally
-└── docs/    # Architecture, deployment, standards, V2 checklist (README stays at root)
+├── api/     # Control-plane FastAPI (projets, files, runs, quotas, WebSocket) + MariaDB
+├── web/     # Dashboard Nuxt 4 — shell desktop Tauri 2 (web + téléphone + desktop, une seule UI)
+├── agent/   # Agent Python — tourne sur chaque PC, pilote Claude Code / Cursor Agent localement
+└── docs/    # Architecture, déploiement, standards, checklist V2
 ```
 
-Full design, data model, error handling and open decisions:
-[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
+Design complet, modèle de données et décisions ouvertes : [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md).
 
-Other docs (all under [`docs/`](./docs/)):
+Autres docs (sous [`docs/`](./docs/)) :
 
-- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — VPS / CI secrets
-- [`docs/STANDARDS_CODE_ET_ARCHITECTURE.md`](./docs/STANDARDS_CODE_ET_ARCHITECTURE.md) — coding conventions
-- [`docs/V2_PLAN.md`](./docs/V2_PLAN.md) — V2 checklist
+- [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) — VPS / secrets CI
+- [`docs/STANDARDS_CODE_ET_ARCHITECTURE.md`](./docs/STANDARDS_CODE_ET_ARCHITECTURE.md) — conventions de code
+- [`docs/V2_PLAN.md`](./docs/V2_PLAN.md) — checklist V2
+- [`docs/CLAUDE_ACCOUNTS_PLAN.md`](./docs/CLAUDE_ACCOUNTS_PLAN.md) — multi-comptes Claude
+- [`docs/CURSOR_ACCOUNTS_PLAN.md`](./docs/CURSOR_ACCOUNTS_PLAN.md) — multi-comptes Cursor
 
 ## Stack
 
-| Layer        | Technology                                                        |
-| ------------ | ---------------------------------------------------------------- |
-| Frontend     | Nuxt 4, Vue 3.5, TypeScript (strict), Pinia, Nuxt UI v4, TailwindCSS v4 |
-| Control-plane| FastAPI, Pydantic v2, SQLAlchemy, MariaDB, WebSocket             |
-| Agent        | Python (subprocess for `claude` / `agent` & `git`, httpx, websockets) |
-| Desktop      | Tauri 2 + static Nuxt generate (signed auto-updater, CI)        |
-| Automation   | Claude Code CLI + Cursor Agent CLI (headless)                     |
-| Hosting      | VPS (Debian OVH) via Docker                                      |
+| Couche | Technologie |
+|--------|-------------|
+| Frontend | Nuxt 4, Vue 3.5, TypeScript (strict), Pinia, Nuxt UI v4, TailwindCSS v4 |
+| Control-plane | FastAPI, Pydantic v2, SQLAlchemy, MariaDB, WebSocket |
+| Agent | Python (subprocess `claude` / `agent` & `git`, httpx, websockets) |
+| Desktop | Tauri 2 + Nuxt static generate (auto-updater signé, CI) |
+| Automatisation | Claude Code CLI + Cursor Agent CLI (headless) |
+| Hébergement | VPS (Debian OVH) via Docker |
 
-## Prerequisites
+## Prérequis
 
 - Node.js 22+
 - Python 3.11+
-- Rust stable (desktop builds only)
-- **Claude Code installed and logged in (Claude Max)** on every PC that runs Claude jobs
-- **Cursor Agent CLI** (`agent`) installed and logged in for Cursor jobs
-- A VPS with Docker for the control-plane
+- Rust stable (builds desktop uniquement)
+- **Claude Code installé et connecté (Claude Max)** sur chaque PC qui exécute des jobs Claude
+- **Cursor Agent CLI** (`agent`) installé et connecté pour les jobs Cursor
+- Un VPS avec Docker pour le control-plane
 
 ## Installation
 
@@ -149,55 +166,54 @@ npm install
 cd ../api
 pip install -r requirements.txt
 
-# Agent (on each PC)
+# Agent (sur chaque PC)
 cd ../agent
 pip install -r requirements.txt
 ```
 
-### Environment
+### Variables d'environnement
 
-`web/.env`:
+`web/.env` :
 
 ```env
 NUXT_PUBLIC_API_BASE=http://localhost:8010
 ```
 
-`agent/.env`:
+`agent/.env` :
 
 ```env
-NF_API_BASE=http://localhost:8010     # VPS URL in prod
-NF_AGENT_TOKEN=<per-machine token>    # issued once in the dashboard (Machines → add)
-NF_CLAUDE_BIN=claude                  # path to the Claude CLI if not on PATH
-NF_CURSOR_BIN=agent                   # path to the Cursor Agent CLI if not on PATH
-NF_TICK_SECONDS=60                    # idle heartbeat
-NF_TICK_SECONDS_WORKING=30            # heartbeat while a run is active
+NF_API_BASE=http://localhost:8010     # URL VPS en prod
+NF_AGENT_TOKEN=<token par machine>    # émis une fois dans le dashboard (Machines → ajouter)
+NF_CLAUDE_BIN=claude                  # chemin vers le CLI Claude si pas dans le PATH
+NF_CURSOR_BIN=agent                   # chemin vers le CLI Cursor Agent si pas dans le PATH
+NF_TICK_SECONDS=60                    # heartbeat au repos
+NF_TICK_SECONDS_WORKING=30            # heartbeat pendant un run actif
 ```
 
-`api/.env` — control-plane config (DB, auth, secrets). Copy from `api/.env.example`.
+`api/.env` — config control-plane (DB, auth, secrets). Copier depuis `api/.env.example`.
 
-## Development
+## Développement
 
 ```bash
-# 0. Start MariaDB + phpMyAdmin
-docker compose up -d          # DB on :3311, phpMyAdmin on :7501
+# 0. Démarrer MariaDB + phpMyAdmin
+docker compose up -d          # DB sur :3311, phpMyAdmin sur :7501
 
-# 1. Control-plane (create api/.env from api/.env.example first)
+# 1. Control-plane (créer api/.env depuis api/.env.example d'abord)
 cd api
-python init_db.py             # create schema + seed admin (contact@dibodev.fr / admin123)
-python run_dev.py             # http://localhost:8010 (Swagger: /docs)
+python init_db.py             # schéma + seed admin (contact@dibodev.fr / admin123)
+python run_dev.py             # http://localhost:8010 (Swagger : /docs)
 
 # 2. Web
 cd ../web
 npm install
 npm run dev                   # http://localhost:3003
 
-# 3. Agent (needs NF_AGENT_TOKEN from the dashboard → Machines)
+# 3. Agent (nécessite NF_AGENT_TOKEN depuis le dashboard → Machines)
 cd ../agent
 python -m nightforge_agent
 ```
 
-From the repo root, `npm install` then `npm run dev` boots the API and web together
-(`concurrently`).
+Depuis la racine du repo, `npm install` puis `npm run dev` démarre l'API et le web ensemble (`concurrently`).
 
 ### Ports locaux (éviter les conflits avec DevLeadHunter)
 
@@ -211,44 +227,29 @@ From the repo root, `npm install` then `npm run dev` boots the API and web toget
 
 ```bash
 cd web
-npm run tauri:dev         # dev shell on port 1420
-npm run tauri:build       # local release build
+npm run tauri:dev         # shell dev sur le port 1420
+npm run tauri:build       # build release locale
 ```
 
-Desktop builds use `NUXT_DESKTOP_BUILD=1` (SSR off, static preset) and talk to the remote
-control-plane via `NUXT_PUBLIC_API_BASE`. Launching the packaged app **auto-starts the local
-agent** as a Tauri sidecar and **force-kills it (process tree) on close** — verify with
-`Get-Process nightforge-agent` after quitting. CI release workflow:
-`.github/workflows/desktop-release.yml` (Windows, auto-updater) also builds the agent
-sidecar with PyInstaller.
+Les builds desktop utilisent `NUXT_DESKTOP_BUILD=1` (SSR off, preset static) et parlent au control-plane distant via `NUXT_PUBLIC_API_BASE`. Lancer l'app packagée **démarre automatiquement l'agent local** et le **tue (arbre de processus) à la fermeture** — vérifier avec `Get-Process nightforge-agent` après avoir quitté. Workflow CI release : `.github/workflows/desktop-release.yml` (Windows, auto-updater) compile aussi le sidecar agent avec PyInstaller.
 
-**Local desktop prerequisites** (once):
+**Prérequis desktop locaux** (une fois) :
 
-- App icons — generate them from a logo: `cd web && npm run tauri icon path/to/logo.png`
-  (writes `src-tauri/icons/*`, which `tauri.conf.json` expects).
-- Agent sidecar for a local `tauri:build` — build it into
-  `web/src-tauri/binaries/nightforge-agent-<target-triple>.exe`. For `tauri:dev`,
-  `scripts/dev-desktop.mjs` auto-creates a **stub** sidecar (Tauri requires the file at
-  compile time) and starts the real agent with `python -m nightforge_agent`; the Rust app
-  skips spawning the sidecar in `cfg(dev)`.
+- Icônes — générer depuis un logo : `cd web && npm run tauri icon path/to/logo.png`
+- Sidecar agent pour un `tauri:build` local — build dans `web/src-tauri/binaries/nightforge-agent-<target-triple>.exe`. Pour `tauri:dev`, `scripts/dev-desktop.mjs` crée un **stub** sidecar et démarre le vrai agent avec `python -m nightforge_agent`.
 
-Required GitHub secrets (same pattern as DevLeadHunter):
+Secrets GitHub requis :
 
 - `TAURI_UPDATER_PUBKEY`
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
 - `NUXT_PUBLIC_API_BASE`
 
-## Safety
+## Sécurité
 
-Autonomous runs use `--dangerously-skip-permissions` (Claude) or `--force --trust`
-(Cursor), so guardrails are mandatory: work only inside the project's repo (either
-directly on `main` when `push_to_main` is on, or on a dedicated `night/YYYY-MM-DD`
-branch), an **error budget** (auto-stop after N failures), and a **kill switch** from the
-UI. Git is the safety net. The agent never stores an Anthropic API key — it uses your
-Claude Max session only.
+Les runs autonomes utilisent `--dangerously-skip-permissions` (Claude) ou `--force --trust` (Cursor). Les garde-fous sont obligatoires : travail uniquement dans le repo du projet (sur `main` si `push_to_main` est activé, sinon branche `night/YYYY-MM-DD`), **budget d'erreurs** (arrêt auto après N échecs) et **kill switch** depuis l'UI. Git est le filet de sécurité. L'agent ne stocke jamais de clé API Anthropic — il utilise uniquement ta session Claude Max.
 
-## Code quality
+## Qualité de code
 
 ```bash
 cd web
@@ -256,8 +257,8 @@ npm run lint              # prettier + eslint + vue-tsc
 npm run lint:fix
 ```
 
-Pre-commit hook (root): `npm --prefix web run lint`.
+Hook pre-commit (racine) : `npm --prefix web run lint`.
 
-## License
+## Licence
 
 MIT

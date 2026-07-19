@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "NightForge — autonomous overnight Claude Code manager (web + desktop)",
+  "description": "NightForge — self-hosted manager for Claude Code & Cursor Agent (prompt queues, multi-account quotas, overnight runs, remote control)",
   "scripts": {
     "dev": "nuxt dev --port 3003",
     "build": "nuxt build",

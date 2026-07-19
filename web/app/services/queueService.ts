@@ -25,7 +25,7 @@ export interface IdeasExpandPayload {
 
 export interface IdeasExpandResult {
   summary?: string | null
-  source: 'agent' | 'heuristic'
+  source: 'agent' | 'groq' | 'heuristic'
   provider_used?: string | null
   model_used?: string | null
   items: QueueItem[]

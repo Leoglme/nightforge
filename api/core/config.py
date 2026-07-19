@@ -91,6 +91,18 @@ class Settings(BaseSettings):
         description="Frontend URL for links/redirects",
     )
 
+    # Groq — cloud LLM fallback for Aide prompts IA when no agent is online
+    groq_api_key: Optional[str] = Field(
+        default=None,
+        alias="GROQ_API_KEY",
+        description="Groq API key for ideas expansion fallback",
+    )
+    groq_model: str = Field(
+        default="llama-3.3-70b-versatile",
+        alias="GROQ_MODEL",
+        description="Groq model id for ideas expansion",
+    )
+
     @property
     def cors_origins(self) -> List[str]:
         """

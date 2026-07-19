@@ -21,13 +21,11 @@
             <span v-if="projectName" class="min-w-0 truncate opacity-70">· {{ projectName }}</span>
           </span>
         </div>
-        <p class="text-sm leading-relaxed break-words whitespace-pre-wrap text-[var(--app-ink)]">
-          {{ message.content }}
-        </p>
+        <div class="chat-md text-sm leading-relaxed break-words text-[var(--app-ink)]" v-html="userHtml" />
       </div>
     </div>
 
-    <!-- Assistant: plain text, no card -->
+    <!-- Assistant: plain text + Claude-style tool action rows -->
     <div class="w-full max-w-[min(46rem,100%)]">
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-[var(--app-ink-soft)]">
@@ -39,7 +37,7 @@
       </div>
 
       <div v-if="message.status === 'PENDING'" class="text-sm text-[var(--app-ink-soft)]">
-        {{ t('runs.chat.waiting') }}
+        {{ pendingLabel }}
       </div>
 
       <div
@@ -54,13 +52,15 @@
         {{ t('runs.chat.thinking') }}
       </div>
 
-      <div
-        v-else-if="events.length"
-        class="max-h-[36vh] space-y-1 overflow-y-auto text-sm leading-relaxed sm:max-h-[40vh]"
-      >
-        <p v-for="ev in events" :key="ev.id" :class="['break-words whitespace-pre-wrap', eventClass(ev.level)]">
-          {{ ev.message }}
-        </p>
+      <div v-else-if="timeline.length" class="chat-md space-y-1 text-sm leading-relaxed">
+        <template v-for="item in timeline" :key="item.id">
+          <div
+            v-if="item.type === 'text'"
+            :class="['break-words', eventClass(item.level)]"
+            v-html="eventHtml(item.message)"
+          />
+          <ChatActionRow v-else :kind="item.kind" :actions="item.actions" @open="openReview(item.kind, item.actions)" />
+        </template>
       </div>
 
       <p v-else-if="message.status === 'DONE'" class="text-sm text-[var(--app-ink-soft)]">
@@ -95,17 +95,22 @@
         </UButton>
       </div>
     </div>
+
+    <ChatCodeReviewSheet v-model:open="reviewOpen" :kind="reviewKind" :actions="reviewActions" />
   </article>
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { AiProvider, EffortLevel } from '~/constants/modelPresets'
 import { EFFORT_LABELS, modelLabel } from '~/constants/modelPresets'
 import type { RunEvent, RunMessage } from '~/types'
+import type { ChatActionKind, ChatToolAction } from '~/utils/chatActions'
+import { buildChatTimeline } from '~/utils/chatActions'
+import { renderChatMarkdown } from '~/utils/chatMarkdown'
 
 /**
- * One chat turn: user gray card + AI plain text (Cursor / Claude layout).
+ * One chat turn: user gray card + AI plain text + tappable tool-action review rows.
  */
 const props = defineProps<{
   message: RunMessage
@@ -113,6 +118,8 @@ const props = defineProps<{
   projectName?: string | null
   canRetry?: boolean
   retrying?: boolean
+  /** Parent run status — clarifies PENDING while WAITING_QUOTA. */
+  runStatus?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -120,6 +127,10 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const reviewOpen = ref(false)
+const reviewKind = ref<ChatActionKind>('edit')
+const reviewActions = ref<ChatToolAction[]>([])
 
 const provider = computed(() => (props.message.provider === 'cursor' ? 'cursor' : 'claude'))
 
@@ -141,6 +152,33 @@ const effortLabel = computed(() => {
 })
 
 const assistantFallback = computed(() => (provider.value === 'cursor' ? t('runs.chat.cursor') : t('runs.chat.claude')))
+
+const userHtml = computed(() => renderChatMarkdown(props.message.content || ''))
+
+const timeline = computed(() => buildChatTimeline(props.events))
+
+const pendingLabel = computed(() => {
+  if (props.runStatus === 'WAITING_QUOTA') {
+    return t('runs.chat.waitingQuota')
+  }
+  return t('runs.chat.waiting')
+})
+
+/**
+ * Open the code-review sheet for a tool-action group.
+ */
+function openReview(kind: ChatActionKind, actions: ChatToolAction[]): void {
+  reviewKind.value = kind
+  reviewActions.value = actions
+  reviewOpen.value = true
+}
+
+/**
+ * Render one streamed log line as Markdown HTML.
+ */
+function eventHtml(message: string): string {
+  return renderChatMarkdown(message)
+}
 
 /**
  * Color class for a streamed log line.

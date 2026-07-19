@@ -33,7 +33,8 @@
     "sequential": "Sequential",
     "estimated": "estimated",
     "real": "live",
-    "reset": "resets"
+    "reset": "resets",
+    "close": "Close"
   },
   "status": {
     "COMPLETED": "Completed",
@@ -58,6 +59,7 @@
       "cursor": "Cursor",
       "retry": "Retry",
       "waiting": "Waiting in queue…",
+      "waitingQuota": "Waiting for available Claude quota…",
       "thinking": "Working…",
       "done": "Done.",
       "failed": "Execution failed.",
@@ -82,6 +84,29 @@
         "high": "High",
         "xhigh": "Extra",
         "max": "Max"
+      },
+      "review": {
+        "modifiedOne": "Modified a file",
+        "modifiedMany": "Modified {n} files",
+        "readOne": "Read",
+        "readMany": "Read {n} files",
+        "ranOne": "Ran a command",
+        "ranMany": "Ran {n} commands",
+        "thinking": "Thinking process",
+        "action": "Action",
+        "editTitle": "Edit",
+        "readTitle": "Read",
+        "commandTitle": "Command",
+        "command": "Command",
+        "file": "File",
+        "output": "Output",
+        "empty": "No changes to show.",
+        "noDiff": "Diff not available for this change.",
+        "statusEdit": "Modified",
+        "statusWrite": "Created",
+        "statusRead": "Read",
+        "statusBash": "Ran",
+        "statusThinking": "Thinking"
       }
     }
   },

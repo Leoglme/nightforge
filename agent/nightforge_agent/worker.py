@@ -35,8 +35,10 @@ from .ws_client import WsClient
 
 logger = logging.getLogger(__name__)
 
+# Only block before Claude when the 5h bucket is actually near empty.
+# Partial usage must NOT delay launches — "fresh quota" waits come from the
+# night planner via ``quota_wait_until``, not from live utilization alone.
 SATURATION_THRESHOLD = 0.85
-ACTIVE_BUCKET_THRESHOLD = 0.02
 
 
 @dataclass
@@ -629,7 +631,15 @@ class Worker:
         self._redispatch_pending = False
 
         wait_until = _parse_dt(run.get("quota_wait_until"))
-        if self._run_needs_claude_quota(run):
+        kind = str(run.get("kind") or "night").strip().lower()
+        if not self._run_needs_claude_quota(run):
+            logger.info("Run %s: Cursor-only — skip Claude quota wait", run_id)
+            await self._emit(run_id, "info", f"Run {run_id}: Cursor-only — skip Claude quota wait")
+        elif kind == "quick":
+            # Queue / on-the-fly launches: start immediately. Real exhaustion is
+            # handled mid-run via Claude CLI quota_hit → _wait_for_quota.
+            logger.info("Run %s: quick launch — skip pre-start Claude quota wait", run_id)
+        else:
             if not await self._ensure_quota_available(run_id, wait_until):
                 await self._finalize_unprocessed_messages(
                     reason="Arrêté avant démarrage (quota / fenêtre)",
@@ -640,9 +650,6 @@ class Worker:
                 await self._emit(run_id, "info", f"Run {run_id} stopped before start (quota/window)")
                 self._finish_run_and_start_next()
                 return
-        else:
-            logger.info("Run %s: Cursor-only — skip Claude quota wait", run_id)
-            await self._emit(run_id, "info", f"Run {run_id}: Cursor-only — skip Claude quota wait")
 
         await self._set_run_status(run_id, "RUNNING")
         logger.info("Run %s started", run_id)
@@ -803,9 +810,11 @@ class Worker:
         self, run_id: int, planned_wait_until: Optional[datetime]
     ) -> bool:
         """
-        Wait until quota is available before the first Claude invocation.
+        Wait until quota is available before the first Claude invocation (night runs).
 
-        Uses the planned timeline when provided, otherwise the live OAuth reading.
+        Live OAuth blocks only when the 5h bucket is saturated (>= 85%).
+        Otherwise the planned timeline from the control-plane (fresh-quota nights)
+        is honored when still in the future.
 
         Args:
             run_id: The active run id.
@@ -818,11 +827,12 @@ class Worker:
         reading = await quota_reader.read_five_hour(self._last_reset_hint)
         if reading is not None and reading.resets_at is not None:
             live_wait = _coerce_wait_until(reading.resets_at)
-            if live_wait is not None and live_wait > _utc_now():
-                if reading.utilization >= SATURATION_THRESHOLD:
-                    wait_until = live_wait
-                elif reading.utilization >= ACTIVE_BUCKET_THRESHOLD:
-                    wait_until = live_wait
+            if (
+                live_wait is not None
+                and live_wait > _utc_now()
+                and reading.utilization >= SATURATION_THRESHOLD
+            ):
+                wait_until = live_wait
 
         if wait_until is None and planned_wait_until is not None:
             planned_wait = _coerce_wait_until(planned_wait_until)
@@ -879,6 +889,12 @@ class Worker:
                     self._run_state.processed_message_ids.add(mid)
                 await self._set_message_status(mid, "FAILED", error)
             return
+
+        # Flip first message to RUNNING before git setup so the UI leaves
+        # "En attente dans la file…" during branch prep / CLI spawn.
+        first_id = messages[0].get("id") if messages else None
+        if first_id is not None:
+            await self._set_message_status(int(first_id), "RUNNING")
 
         if not await git_manager.ensure_clean(cwd):
             await self._emit(run_id, "warning", f"{name}: working tree not clean, continuing")

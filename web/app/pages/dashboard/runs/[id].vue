@@ -61,7 +61,7 @@
     <!-- Chat thread -->
     <div
       ref="threadEl"
-      class="min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-contain px-3 py-4 sm:space-y-10 sm:px-5 sm:py-6"
+      class="app-scroll min-h-0 flex-1 space-y-8 overflow-y-auto overscroll-contain px-3 py-4 sm:space-y-10 sm:px-5 sm:py-6"
     >
       <div
         v-if="!messages.length"
@@ -78,6 +78,7 @@
         :message="turn.message"
         :events="turn.events"
         :project-name="projectNameFor(turn.message.project_id)"
+        :run-status="run?.status"
         :can-retry="canRetryMessage(turn.message)"
         :retrying="retryingId === turn.message.id"
         @retry="retryMessage(turn.message)"

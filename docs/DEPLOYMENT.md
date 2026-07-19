@@ -144,6 +144,7 @@ Dans **Settings → Secrets and variables → Actions** du repo `nightforge`.
 | `ADMIN_EMAIL` | Email admin initial (seeder) | `contact@dibodev.fr` |
 | `ADMIN_PASSWORD` | Mot de passe admin initial | **mot de passe fort** (change-le après 1er login) |
 | `ENCRYPTION_KEY` | Clé Fernet pour secrets agents | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `GROQ_API_KEY` | Clé Groq (fallback Aide prompts IA si agent offline) | Console [console.groq.com](https://console.groq.com) |
 
 ### 4.3 Web (`deploy-web.yml`)
 

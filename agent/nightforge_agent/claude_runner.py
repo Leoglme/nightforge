@@ -14,23 +14,55 @@ from datetime import datetime, timedelta
 from typing import AsyncIterator, Optional
 
 from .session_scanner import find_latest_session_id
+from .stream_actions import (
+    encode_action,
+    extract_claude_assistant_parts,
+    session_id_from_event,
+    try_parse_json_line,
+)
 
 logger = logging.getLogger(__name__)
 
-# Substrings that hint the 5-hour quota was hit (best-effort; refine on real output).
+# Phrases that clearly mean Claude Max / session quota is exhausted.
+# Do NOT use bare words like "quota" — they match normal assistant text and
+# git diffs of this very codebase (false WAITING_QUOTA).
 _QUOTA_MARKERS = (
-    "usage limit",
-    "rate limit",
-    "quota",
-    "session limit",
     "you've reached your limit",
-    "you've hit your",
-    "resets at",
-    "resets ",
-    "réinitialisation",
-    "limite d'utilisation",
-    "try again later",
+    "you've hit your limit",
+    "you have reached your limit",
+    "you have hit your limit",
+    "usage limit reached",
+    "hit your usage limit",
+    "reached your usage limit",
+    "session limit reached",
+    "rate limit reached",
+    "limite d'utilisation atteinte",
+    "limite d’utilisation atteinte",
+    "tu as atteint ta limite",
+    "vous avez atteint votre limite",
 )
+
+
+def looks_like_quota_exhaustion(text: str) -> bool:
+    """
+    Return True only when the line clearly reports Claude quota exhaustion.
+
+    Args:
+        text: A single CLI / stream line (or short error message).
+
+    Returns:
+        Whether this should flip ``quota_hit``.
+    """
+    lowered = text.lower()
+    if any(marker in lowered for marker in _QUOTA_MARKERS):
+        return True
+    # "Resets at 3pm" style — only when paired with limit/usage language.
+    if ("reset" in lowered or "réinitialisation" in lowered) and (
+        "limit" in lowered or "limite" in lowered or "usage" in lowered
+    ):
+        return True
+    return False
+
 
 # Best-effort patterns to extract a reset time from Claude CLI output.
 _RESET_ISO = re.compile(r"resets? at[^0-9]*([0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9:]+)", re.IGNORECASE)
@@ -187,7 +219,16 @@ async def run_prompt(
         Output lines, then a final sentinel line.
     """
     started_at = time.time()
-    args = [claude_bin, "-p", prompt, "--dangerously-skip-permissions"]
+    # stream-json + verbose → tool_use blocks (Edit/Write/Read) for code review UI.
+    args = [
+        claude_bin,
+        "-p",
+        prompt,
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+    ]
     if model:
         args += ["--model", model]
     if effort:
@@ -211,13 +252,55 @@ async def run_prompt(
     assert process.stdout is not None
     async for raw in process.stdout:
         line = raw.decode(errors="replace").rstrip("\n")
-        lowered = line.lower()
-        if any(marker in lowered for marker in _QUOTA_MARKERS):
-            quota_hit = True
-            parsed = parse_reset_hint(line)
-            if parsed is not None:
-                reset_hint = parsed
-        yield line
+
+        event = try_parse_json_line(line)
+        if event is None:
+            # Non-JSON fallback (older CLI / noise) — keep raw log line.
+            if line.strip():
+                if looks_like_quota_exhaustion(line):
+                    quota_hit = True
+                    parsed = parse_reset_hint(line)
+                    if parsed is not None:
+                        reset_hint = parsed
+                yield line
+            continue
+
+        sid = session_id_from_event(event)
+        if sid:
+            session_id = sid
+
+        if event.get("type") == "result":
+            # Prefer already-streamed assistant text; only surface hard errors here.
+            err_msg = str(event.get("error") or event.get("result") or "")
+            if event.get("is_error") or event.get("subtype") == "error":
+                if err_msg.strip():
+                    if looks_like_quota_exhaustion(err_msg):
+                        quota_hit = True
+                        parsed = parse_reset_hint(err_msg)
+                        if parsed is not None:
+                            reset_hint = parsed
+                    yield err_msg
+            elif err_msg and looks_like_quota_exhaustion(err_msg):
+                # Successful result payload that still embeds a limit notice.
+                quota_hit = True
+                parsed = parse_reset_hint(err_msg)
+                if parsed is not None:
+                    reset_hint = parsed
+            continue
+
+        # Never scan full stream-json blobs for quota (tool_result / diffs contain "quota").
+        texts, actions = extract_claude_assistant_parts(event)
+        for text in texts:
+            if text.strip():
+                # Short system-style notices only — not long code reviews.
+                if len(text) < 400 and looks_like_quota_exhaustion(text):
+                    quota_hit = True
+                    parsed = parse_reset_hint(text)
+                    if parsed is not None:
+                        reset_hint = parsed
+                yield text
+        for action in actions:
+            yield encode_action(action)
 
     exit_code = await process.wait()
     if session_id is None:

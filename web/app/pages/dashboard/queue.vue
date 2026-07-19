@@ -244,8 +244,8 @@
     >
       <div class="flex flex-col gap-4">
         <p class="text-sm text-[var(--app-ink-soft)]">
-          Colle un pavé d’idées ou des mots-clés. NightForge découpe, rédige les prompts et choisit le modèle (Composer
-          2.5 si dispo, sinon Claude Haiku). Machine en ligne = expansion IA ; sinon heuristique locale.
+          Colle un pavé d’idées ou des mots-clés. NightForge découpe, rédige les prompts et choisit le meilleur modèle
+          (Cursor ou Claude). Machine en ligne → agent ; sinon Groq ; sinon heuristique locale.
         </p>
 
         <UFormField label="Projet">
@@ -547,7 +547,9 @@ async function expandAndAdd(): Promise<void> {
     const via =
       result.source === 'agent'
         ? `via ${result.provider_used || 'agent'} (${result.model_used || '?'})`
-        : 'heuristique locale'
+        : result.source === 'groq'
+          ? `via Groq (${result.model_used || '?'})`
+          : 'heuristique locale'
     toast.add({
       title: `${result.items.length} prompt(s) ajouté(s)`,
       description: result.summary ? `${result.summary} — ${via}` : via,

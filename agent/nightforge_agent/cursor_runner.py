@@ -13,6 +13,13 @@ import shutil
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
+from .stream_actions import (
+    action_from_cursor_tool_call,
+    encode_action,
+    expand_action_if_needed,
+    try_parse_json_line,
+)
+
 logger = logging.getLogger(__name__)
 
 #: Serialize auto-install so parallel prompts do not race the installer.
@@ -448,6 +455,8 @@ async def run_prompt(
             "--force",
             "--trust",
             "--approve-mcps",
+            "--output-format",
+            "stream-json",
             "--workspace",
             cwd,
         ]
@@ -458,6 +467,8 @@ async def run_prompt(
             "--force",
             "--trust",
             "--approve-mcps",
+            "--output-format",
+            "stream-json",
             "--workspace",
             cwd,
         ]
@@ -507,10 +518,69 @@ async def run_prompt(
 
     assert process.stdout is not None
     collected: list[str] = []
+    emitted_calls: set[str] = set()
     async for raw in process.stdout:
         line = raw.decode(errors="replace").rstrip("\n")
         collected.append(line)
-        yield line
+
+        event = try_parse_json_line(line)
+        if event is None:
+            if line.strip():
+                yield line
+            continue
+
+        etype = event.get("type")
+        if etype == "assistant":
+            # Skip duplicate flushes when stream-partial-output is enabled later.
+            if event.get("model_call_id"):
+                continue
+            message = event.get("message") or {}
+            content = message.get("content") or []
+            if isinstance(content, str) and content.strip():
+                yield content
+            elif isinstance(content, list):
+                parts: list[str] = []
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        text = str(block.get("text") or "")
+                        if text:
+                            parts.append(text)
+                if parts:
+                    yield "\n".join(parts)
+            continue
+
+        if etype == "tool_call":
+            subtype = event.get("subtype")
+            call_id = str(event.get("call_id") or "")
+            tool_call = event.get("tool_call") or {}
+            if call_id and call_id in emitted_calls:
+                continue
+            if subtype == "completed":
+                action = action_from_cursor_tool_call(tool_call)
+                if action:
+                    if call_id:
+                        emitted_calls.add(call_id)
+                    for part in expand_action_if_needed(action):
+                        yield encode_action(part)
+            elif subtype == "started" and (
+                "readToolCall" in tool_call or "shellToolCall" in tool_call
+            ):
+                action = action_from_cursor_tool_call(tool_call)
+                if action:
+                    if call_id:
+                        emitted_calls.add(call_id)
+                    for part in expand_action_if_needed(action):
+                        yield encode_action(part)
+            continue
+
+        if etype == "result":
+            if event.get("is_error"):
+                err = str(event.get("result") or event.get("error") or "Cursor error")
+                if err.strip():
+                    yield err
+            continue
+
+        # Unknown JSON — ignore (system/user init noise).
 
     exit_code = await process.wait()
 

@@ -103,6 +103,7 @@ def build_run_payload(db: Session, run: Run) -> dict:
         "type": "run.payload",
         "run": {
             "id": run.id,
+            "kind": getattr(run, "kind", None) or "night",
             "parallel": run.parallel,
             "quota_count": run.quota_count,
             "window_end": run.window_end.isoformat() if run.window_end else None,

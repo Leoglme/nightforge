@@ -116,7 +116,7 @@
 
           <div
             ref="threadEl"
-            class="min-h-0 space-y-5 overflow-y-auto px-3 py-3 sm:space-y-6 lg:px-4 lg:py-4"
+            class="app-scroll min-h-0 space-y-5 overflow-y-auto px-3 py-3 sm:space-y-6 lg:px-4 lg:py-4"
             :class="activeMessages.length === 0 ? 'shrink-0 lg:min-h-0 lg:flex-1' : 'flex-1'"
           >
             <div

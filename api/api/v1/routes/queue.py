@@ -19,6 +19,7 @@ from services.auth_service import get_current_active_user
 from services.ideas_expander import (
     build_agent_prompt,
     drafts_from_agent_payload,
+    expand_via_groq,
     heuristic_expand,
 )
 
@@ -123,8 +124,8 @@ async def expand_ideas_to_queue(
     """
     Expand free-form ideas into queue prompts and persist them.
 
-    Prefers an online agent (Cursor Composer 2.5, then Claude Haiku). Falls back to
-    a local heuristic inspired by the plan-de-session skill when no agent answers.
+    Prefers an online agent (Cursor / Claude). Then Groq cloud LLM if configured.
+    Last resort: local heuristic inspired by the plan-de-session skill.
 
     Args:
         project_id: The project id.
@@ -165,6 +166,17 @@ async def expand_ideas_to_queue(
                 source = "agent"
                 provider_used = response.get("provider_used")
                 model_used = response.get("model_used")
+
+    if not drafts:
+        groq_summary, groq_drafts, groq_model = await expand_via_groq(
+            ideas=payload.ideas, project_name=project.name
+        )
+        if groq_drafts:
+            summary = groq_summary
+            drafts = groq_drafts
+            source = "groq"
+            provider_used = "groq"
+            model_used = groq_model
 
     if not drafts:
         summary, drafts = heuristic_expand(

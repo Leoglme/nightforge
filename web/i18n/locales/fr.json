@@ -67,7 +67,8 @@
     "sequential": "Séquentiel",
     "estimated": "estimé",
     "real": "réel",
-    "reset": "fin"
+    "reset": "fin",
+    "close": "Fermer"
   },
   "status": {
     "COMPLETED": "Terminé",
@@ -96,6 +97,7 @@
       "cursor": "Cursor",
       "retry": "Relancer",
       "waiting": "En attente dans la file…",
+      "waitingQuota": "Attente d’un quota Claude disponible…",
       "thinking": "En cours…",
       "done": "Terminé.",
       "failed": "Échec de l'exécution.",
@@ -120,6 +122,29 @@
         "high": "Élevé",
         "xhigh": "Extra",
         "max": "Max"
+      },
+      "review": {
+        "modifiedOne": "A modifié un fichier",
+        "modifiedMany": "A modifié {n} fichiers",
+        "readOne": "Lu",
+        "readMany": "A lu {n} fichiers",
+        "ranOne": "A exécuté une commande",
+        "ranMany": "A exécuté {n} commandes",
+        "thinking": "Processus de réflexion",
+        "action": "Action",
+        "editTitle": "Edit",
+        "readTitle": "Read",
+        "commandTitle": "Commande",
+        "command": "Commande",
+        "file": "Fichier",
+        "output": "Sortie",
+        "empty": "Aucune modification à afficher.",
+        "noDiff": "Diff non disponible pour cette modification.",
+        "statusEdit": "Modifié",
+        "statusWrite": "Créé",
+        "statusRead": "Lu",
+        "statusBash": "Exécuté",
+        "statusThinking": "Réflexion"
       }
     }
   },

@@ -37,7 +37,7 @@ class IdeasExpandResponse(BaseModel):
     """Result of expanding ideas into queue items."""
 
     summary: Optional[str] = None
-    source: Literal["agent", "heuristic"] = "heuristic"
+    source: Literal["agent", "groq", "heuristic"] = "heuristic"
     provider_used: Optional[str] = None
     model_used: Optional[str] = None
     items: List[QueueItemResponse]
