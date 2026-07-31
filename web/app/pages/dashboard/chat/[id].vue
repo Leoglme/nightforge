@@ -10,11 +10,11 @@
           color="neutral"
           variant="ghost"
           icon="i-lucide-arrow-left"
-          to="/dashboard/runs"
+          to="/dashboard/chat"
           :aria-label="t('nav.back')"
         />
         <h1 class="truncate text-base font-semibold tracking-[-0.02em] text-[var(--app-ink)] sm:text-lg">
-          {{ isQuick ? t('common.launch') : t('common.night') }} #{{ id }}
+          {{ headerTitle }}
         </h1>
       </div>
 
@@ -173,6 +173,14 @@ const projectSummary = computed(() => {
     return ''
   }
   return runProjects.value.map((p) => p.name).join(' · ')
+})
+
+/** Conversation title in the top bar: project name(s) first, run label as fallback. */
+const headerTitle = computed(() => {
+  if (projectSummary.value) {
+    return projectSummary.value
+  }
+  return `${isQuick.value ? t('common.launch') : t('common.night')} #${id}`
 })
 
 /** Compact meta for the header center (project · machine · progress). */

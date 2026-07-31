@@ -109,18 +109,19 @@ const userStore = useUserStore()
 const showUserMenu = ref(false)
 
 const isComposePage = computed(() => route.path === '/dashboard/compose')
-const isRunDetailPage = computed(() => /^\/dashboard\/runs\/\d+/.test(route.path))
-const isFullBleed = computed(() => isComposePage.value || isRunDetailPage.value)
+const isChatDetailPage = computed(() => /^\/dashboard\/chat\/\d+/.test(route.path))
+const isFullBleed = computed(() => isComposePage.value || isChatDetailPage.value)
 
 /**
- * Flat navigation (no categories). Machines stays out of the menu — it's
+ * Flat navigation (no categories). Discussions is the conversation hub (chat with
+ * Claude Code / Cursor, remote code review). Machines stays out of the menu — it's
  * already reachable from the dashboard overview cards.
  */
 const links = computed(() => [
   { to: '/dashboard', icon: 'i-lucide-layout-dashboard', label: t('nav.dashboard') },
-  { to: '/dashboard/compose', icon: 'i-lucide-messages-square', label: t('nav.compose') },
+  { to: '/dashboard/chat', icon: 'i-lucide-messages-square', label: t('nav.chat') },
+  { to: '/dashboard/compose', icon: 'i-lucide-moon-star', label: t('nav.compose') },
   { to: '/dashboard/queue', icon: 'i-lucide-lightbulb', label: t('nav.queue') },
-  { to: '/dashboard/runs', icon: 'i-lucide-rocket', label: t('nav.runs') },
 ])
 
 /** User display name. */

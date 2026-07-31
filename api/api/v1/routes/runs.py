@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from core.database import get_db
@@ -22,7 +23,7 @@ from models.run_message import RunMessage
 from models.run_project import RunProject
 from models.user import User
 from schemas.quota import QuotaPlanRequest
-from schemas.run import RunAddQuotas, RunCreate, RunEventResponse, RunResponse
+from schemas.run import RunAddQuotas, RunCreate, RunEventResponse, RunFirstMessage, RunResponse
 from schemas.run_message import RunMessageCreate, RunMessageResponse, RunMessageRetry, RunProjectSummary
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user
@@ -159,6 +160,33 @@ def _snapshot_queue_items(
     return count
 
 
+def _seed_first_message(
+    db: Session, run_id: int, project_id: int, first_message: RunFirstMessage
+) -> None:
+    """
+    Seed a new conversation with its first free-text message (Discussions hub).
+
+    Args:
+        db: Database session.
+        run_id: The run to attach the message to.
+        project_id: The single project the conversation targets.
+        first_message: The user's opening message and provider/model metadata.
+    """
+    db.add(
+        RunMessage(
+            run_id=run_id,
+            project_id=project_id,
+            order_index=0,
+            content=first_message.content,
+            claude_session_id=first_message.claude_session_id,
+            claude_model=first_message.claude_model,
+            provider=first_message.provider,
+            effort=first_message.effort,
+            fast_mode=bool(first_message.fast_mode),
+        )
+    )
+
+
 async def _rebuild_planned_timeline(db: Session, run: Run, user_id: int) -> None:
     """Recalculate and persist the quota plan after the budget changes."""
     anchor_reset_at, anchor_utilization = await _machine_quota_anchor(
@@ -188,26 +216,86 @@ ACTIVE_RUN_STATUSES = {
 }
 
 
+def _conversation_title(content: str, limit: int = 70) -> str:
+    """
+    Derive a one-line conversation title from a message body.
+
+    Args:
+        content: The raw message content.
+        limit: Maximum length before truncation.
+
+    Returns:
+        A collapsed, truncated single-line title.
+    """
+    text = " ".join(content.strip().split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
 @router.get("", response_model=List[RunResponse])
 async def list_runs(
     current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
 ) -> Any:
     """
-    List the current user's runs (most recent first).
+    List the current user's runs (most recent first), enriched for the Discussions hub.
 
     Args:
         current_user: The authenticated user.
         db: Database session.
 
     Returns:
-        The user's runs.
+        The user's runs with project names, a conversation title and last activity time.
     """
-    return (
+    runs = (
         db.query(Run)
         .filter(Run.user_id == current_user.id)
         .order_by(Run.created_at.desc())
         .all()
     )
+    if not runs:
+        return []
+
+    run_ids = [run.id for run in runs]
+
+    names_by_run: dict[int, list[str]] = {}
+    for run_id, name in (
+        db.query(RunProject.run_id, Project.name)
+        .join(Project, Project.id == RunProject.project_id)
+        .filter(RunProject.run_id.in_(run_ids))
+        .order_by(RunProject.run_id.asc(), RunProject.order_index.asc())
+        .all()
+    ):
+        names_by_run.setdefault(run_id, []).append(name)
+
+    title_by_run: dict[int, str] = {}
+    for run_id, content in (
+        db.query(RunMessage.run_id, RunMessage.content)
+        .filter(RunMessage.run_id.in_(run_ids))
+        .order_by(RunMessage.run_id.asc(), RunMessage.order_index.asc(), RunMessage.id.asc())
+        .all()
+    ):
+        if run_id not in title_by_run and content:
+            title_by_run[run_id] = _conversation_title(content)
+
+    activity_by_run: dict[int, datetime] = {
+        run_id: last_at
+        for run_id, last_at in db.query(RunEvent.run_id, func.max(RunEvent.created_at))
+        .filter(RunEvent.run_id.in_(run_ids))
+        .group_by(RunEvent.run_id)
+        .all()
+    }
+
+    responses: List[RunResponse] = []
+    for run in runs:
+        resp = RunResponse.model_validate(run)
+        resp.project_names = names_by_run.get(run.id, [])
+        resp.title = title_by_run.get(run.id)
+        resp.last_activity_at = (
+            activity_by_run.get(run.id) or run.finished_at or run.started_at or run.created_at
+        )
+        responses.append(resp)
+    return responses
 
 
 @router.post("", response_model=RunResponse, status_code=status.HTTP_201_CREATED)
@@ -246,6 +334,18 @@ async def create_run(
     if len(projects) != len(set(payload.project_ids)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown project(s)")
 
+    if payload.first_message is not None:
+        if payload.queue_item_ids is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="first_message et queue_item_ids sont mutuellement exclusifs",
+            )
+        if len(payload.project_ids) != 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Une conversation cible un seul projet",
+            )
+
     items_by_id: dict[int, QueueItem] = {}
     if payload.queue_item_ids is not None:
         if not payload.queue_item_ids:
@@ -269,7 +369,8 @@ async def create_run(
                 detail=f"Queue item(s) introuvable(s) pour ces projets: {missing}",
             )
 
-    is_quick = payload.queue_item_ids is not None
+    has_first_message = payload.first_message is not None
+    is_quick = payload.queue_item_ids is not None or has_first_message
     planned_timeline = None
     if not is_quick:
         # Night runs need the Claude quota plan; quick launches skip it (Cursor/Claude
@@ -314,6 +415,9 @@ async def create_run(
                 if item_id in items_by_id and items_by_id[item_id].project_id == project_id
             ]
             message_total += _snapshot_queue_items(db, run.id, project_id, project_item_ids)
+        elif has_first_message:
+            _seed_first_message(db, run.id, project_id, payload.first_message)
+            message_total += 1
         else:
             _snapshot_project_messages_with_sessions(db, run.id, project_id)
 

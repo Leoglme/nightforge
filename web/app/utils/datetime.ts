@@ -57,6 +57,32 @@ export function formatClockFr(value: string | Date): string {
 }
 
 /**
+ * Formate un timestamp en libellé relatif court, ex. « à l'instant », « 3 min », « 5 h », « 12 mars ».
+ * @param value - Timestamp ISO ou Date.
+ * @returns Le libellé relatif.
+ */
+export function formatRelativeFr(value: string | Date): string {
+  const date = parseApiDateTime(value)
+  const diffMs = Date.now() - date.getTime()
+  const minutes = Math.round(diffMs / 60000)
+  if (minutes < 1) {
+    return "à l'instant"
+  }
+  if (minutes < 60) {
+    return `${minutes} min`
+  }
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) {
+    return `${hours} h`
+  }
+  const days = Math.round(hours / 24)
+  if (days < 7) {
+    return `${days} j`
+  }
+  return date.toLocaleDateString(APP_LOCALE, { day: 'numeric', month: 'short' })
+}
+
+/**
  * Heure du jour, ou « sam. 04:50 » si ce n'est pas aujourd'hui.
  */
 export function formatTimeLabelFr(iso: string): string {

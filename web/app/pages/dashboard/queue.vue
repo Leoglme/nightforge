@@ -465,7 +465,7 @@ async function launchItems(ids: number[]): Promise<void> {
       title: ids.length === 1 ? 'Prompt lancé' : `${ids.length} prompts lancés`,
       color: 'success',
     })
-    await router.push(`/dashboard/runs/${run.id}`)
+    await router.push(`/dashboard/chat/${run.id}`)
   } catch (err) {
     toast.add({
       title: 'Impossible de lancer',

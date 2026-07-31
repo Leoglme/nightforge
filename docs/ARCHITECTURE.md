@@ -3,7 +3,7 @@
 > **Statut :** V2 implémentée (multi-provider Claude + Cursor, carnet de prompts, lifecycle sidecar).
 > **Auteur du besoin :** Léo Guillaume (Dibodev).
 > **But de ce document :** figer tout ce qui a été compris et décidé pour retrouver le contexte plus tard et servir de source de vérité.
-> **Dernière mise à jour :** 2026-07-18.
+> **Dernière mise à jour :** 2026-08-01.
 > **Suivi V2 :** [`V2_PLAN.md`](./V2_PLAN.md).
 
 ---
@@ -298,6 +298,13 @@ nightforge/
 
 ## 13. Interfaces
 
+### Discussions — hub conversationnel (web + desktop + mobile)
+Entrée principale du chat, dans la nav desktop **et** la tab bar mobile (`/dashboard/chat`), calquée sur l'app mobile Claude Code :
+- **Liste des conversations** : titre (1ᵉʳ message), projet(s)/dépôt, machine + statut en ligne, état du run, heure relative ; les nuits y figurent aussi. Enrichie par `GET /runs` (`title`, `project_names`, `last_activity_at`).
+- **Nouvelle conversation** (drawer mobile-first) : projet + machine + provider/modèle/effort/fast, reprise optionnelle d'une **session Claude du PC** (`sessions.list` → `--resume`), puis premier message. Crée un run `quick` mono-projet via `POST /runs` + `first_message`.
+- **Détail** : réutilise le composant de chat des runs (bulles, actions outils, **revue de code** liste → diff) pour piloter et relire l'IA à distance.
+- Une **conversation** = un run `quick` amorcé par un message ; le multi-tour et la reprise passent par les mécaniques existantes (`run_messages`, `message.session`/`claude_session_id`, `run.update`). Cursor n'a pas de reprise de conversation (CLI sans `--resume`).
+
 ### Dashboard (web + desktop, même UI)
 - **Compositeur de nuit** (écran principal) : layout 3 colonnes type chat — projets à gauche, messages au centre, bibliothèque de prompts à droite ; estimation quotas + lancement en barre supérieure.
 - **État courant** par machine : `idle` / `working` / `waiting_quota` / `error`.
@@ -307,7 +314,7 @@ nightforge/
 - **Historique** des runs (commits, messages traités, échecs, résumé).
 
 ### Mobile (même app en web responsive)
-Depuis le téléphone, sans VPN : gérer la bibliothèque de prompts, **composer les messages** par projet (drawer bibliothèque), choisir machine + quotas, **lancer** un run, **arrêter** (kill switch), suivre logs & progression des messages.
+Depuis le téléphone, sans VPN : **démarrer / reprendre une conversation** (Discussions) et relire les diffs à distance, gérer la bibliothèque de prompts, **composer les messages** par projet (drawer bibliothèque), choisir machine + quotas, **lancer** un run, **arrêter** (kill switch), suivre logs & progression des messages.
 
 ---
 

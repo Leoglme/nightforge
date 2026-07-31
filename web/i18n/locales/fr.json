@@ -7,7 +7,7 @@
     "dashboard": "Tableau de bord",
     "projects": "Projets",
     "machines": "Machines",
-    "runs": "Lancements",
+    "chat": "Discussions",
     "compose": "Composer",
     "queue": "File d'attente",
     "plan": "Planificateur",
@@ -146,6 +146,32 @@
         "statusBash": "Exécuté",
         "statusThinking": "Réflexion"
       }
+    }
+  },
+  "chat": {
+    "subtitle": "Démarre ou reprends une conversation Claude Code ou Cursor, à distance.",
+    "newConversation": "Nouvelle conversation",
+    "devices": "Appareils",
+    "manageDevices": "Gérer",
+    "noDevices": "Aucune machine. Ajoute-en une pour lancer des conversations à distance.",
+    "emptyHint": "Aucune conversation pour l'instant. Démarre-en une pour faire travailler l'IA sur un projet.",
+    "machineOffline": "Machine hors ligne",
+    "new": {
+      "title": "Nouvelle conversation",
+      "subtitle": "Projet, machine, modèle — puis ton premier message.",
+      "noProjects": "Aucun projet. Crée ton premier projet pour démarrer une conversation.",
+      "createProject": "Nouveau projet",
+      "project": "Projet",
+      "projectPlaceholder": "Choisir un projet",
+      "machine": "Machine",
+      "machinePlaceholder": "Choisir une machine",
+      "machineOfflineHint": "Machine hors ligne — lance l'app NightForge sur ce PC pour exécuter.",
+      "offlineTag": "(hors ligne)",
+      "message": "Premier message",
+      "messagePlaceholder": "Décris la feature ou la tâche à faire…",
+      "messagePlaceholderResume": "Optionnel — laisse vide pour « Vas-y, continue »",
+      "start": "Démarrer",
+      "failed": "Impossible de démarrer la conversation"
     }
   },
   "compose": {

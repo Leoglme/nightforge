@@ -284,6 +284,10 @@ export interface Run {
   window_end?: string | null
   finished_at?: string | null
   created_at: string
+  /** Conversation-hub enrichments (populated by the list endpoint). */
+  project_names?: string[]
+  title?: string | null
+  last_activity_at?: string | null
 }
 
 export interface RunEvent {

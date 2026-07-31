@@ -195,7 +195,7 @@
       </div>
       <ul v-else class="divide-y divide-[var(--app-line)]">
         <li v-for="run in runs" :key="run.id" class="flex items-center justify-between py-3 text-sm">
-          <NuxtLink :to="`/dashboard/runs/${run.id}`" class="hover:opacity-80">
+          <NuxtLink :to="`/dashboard/chat/${run.id}`" class="hover:opacity-80">
             {{ t('common.night') }} #{{ run.id }} — {{ t('common.machine').toLowerCase() }} {{ run.machine_id }}
           </NuxtLink>
           <StatusBadge :status="run.status" dot />
@@ -286,7 +286,7 @@ const stats = computed(() => [
       projectsOpen.value = true
     },
   },
-  { label: t('nav.runs'), value: runs.value.length, icon: 'i-lucide-rocket', to: '/dashboard/runs' },
+  { label: t('nav.chat'), value: runs.value.length, icon: 'i-lucide-messages-square', to: '/dashboard/chat' },
 ])
 
 /**

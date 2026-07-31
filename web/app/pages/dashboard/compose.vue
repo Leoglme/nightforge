@@ -1131,7 +1131,7 @@ async function launch(): Promise<void> {
       wait_for_fresh_quota: waitForFreshQuota.value,
     })
     toast.add({ title: 'Nuit lancée', color: 'success' })
-    router.push(`/dashboard/runs/${run.id}`)
+    router.push(`/dashboard/chat/${run.id}`)
   } finally {
     launching.value = false
   }

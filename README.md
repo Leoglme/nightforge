@@ -87,9 +87,19 @@ Pendant et après chaque lancement, NightForge affiche les **fichiers modifiés*
 |:---:|:---:|
 | ![Liste des fichiers modifiés lors d'un lancement](docs/images/code-review.png) | ![Diff ligne par ligne d'un fichier](docs/images/code-review-diff.png) |
 
+### Discussions — chat à distance (Claude Code & Cursor)
+
+L'onglet **Discussions** (`/dashboard/chat`) est le hub conversationnel, pensé mobile-first (dans la nav desktop **et** la tab bar mobile). Comme l'app mobile Claude Code :
+
+- **Liste des conversations** — chaque discussion affiche son titre (le 1ᵉʳ message), son projet/dépôt, la machine cible avec son **statut en ligne**, l'état (en cours / terminé…) et l'heure relative. Les nuits y apparaissent aussi.
+- **Nouvelle conversation** — depuis le téléphone : choisis le **projet**, la **machine**, le **provider** (Claude Code / Cursor) + modèle/effort/fast, écris ton premier message → l'agent l'exécute sur le PC. Reprise possible d'une **session Claude déjà démarrée sur l'ordinateur** (`--resume`, Claude uniquement — Cursor CLI n'a pas de reprise).
+- **Reprendre une conversation** — rouvre n'importe quelle discussion pour continuer une feature : même composant de chat que les runs, avec la **revue de code intégrée** (fichiers modifiés + diff ligne par ligne) pour valider le travail de l'IA à distance.
+
+Côté control-plane, une conversation = un run `quick` mono-projet amorcé par un premier message (`POST /runs` avec `first_message`), réutilisant tout le pipeline runs/messages/events/session-id existant.
+
 ### Contrôle à distance
 
-Démarre tes machines, lance l'app desktop (qui démarre l'agent local), puis **pilote tout depuis ton téléphone** via le navigateur : ajouter des prompts, lancer la file d'attente, composer une nuit, suivre les logs en direct. Les machines se connectent **en sortie** vers ton VPS — aucun VPN requis.
+Démarre tes machines, lance l'app desktop (qui démarre l'agent local), puis **pilote tout depuis ton téléphone** via le navigateur : démarrer/reprendre une conversation (Discussions), ajouter des prompts, lancer la file d'attente, composer une nuit, suivre les logs en direct. Les machines se connectent **en sortie** vers ton VPS — aucun VPN requis.
 
 ## Comment ça marche
 

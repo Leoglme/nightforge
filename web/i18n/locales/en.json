@@ -6,7 +6,7 @@
     "dashboard": "Dashboard",
     "projects": "Projects",
     "machines": "Machines",
-    "runs": "Runs",
+    "chat": "Discussions",
     "compose": "Compose",
     "queue": "Queue",
     "plan": "Planner",
@@ -108,6 +108,32 @@
         "statusBash": "Ran",
         "statusThinking": "Thinking"
       }
+    }
+  },
+  "chat": {
+    "subtitle": "Start or resume a Claude Code or Cursor conversation, remotely.",
+    "newConversation": "New conversation",
+    "devices": "Devices",
+    "manageDevices": "Manage",
+    "noDevices": "No machine yet. Add one to run conversations remotely.",
+    "emptyHint": "No conversation yet. Start one to put the AI to work on a project.",
+    "machineOffline": "Machine offline",
+    "new": {
+      "title": "New conversation",
+      "subtitle": "Project, machine, model — then your first message.",
+      "noProjects": "No project yet. Create your first project to start a conversation.",
+      "createProject": "New project",
+      "project": "Project",
+      "projectPlaceholder": "Choose a project",
+      "machine": "Machine",
+      "machinePlaceholder": "Choose a machine",
+      "machineOfflineHint": "Machine offline — launch the NightForge app on that PC to run.",
+      "offlineTag": "(offline)",
+      "message": "First message",
+      "messagePlaceholder": "Describe the feature or task to build…",
+      "messagePlaceholderResume": "Optional — leave empty for « Go ahead, continue »",
+      "start": "Start",
+      "failed": "Could not start the conversation"
     }
   },
   "compose": {

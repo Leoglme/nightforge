@@ -14,6 +14,16 @@ export function listRuns(): Promise<Run[]> {
   return api.get<Run[]>('/api/v1/runs')
 }
 
+/** First free-text message that seeds a new remote conversation. */
+export interface ConversationFirstMessage {
+  content: string
+  claude_session_id?: string | null
+  claude_model?: string | null
+  provider?: string | null
+  effort?: string | null
+  fast_mode?: boolean
+}
+
 /**
  * Schedule a night run.
  * @param payload - Run creation payload.
@@ -29,8 +39,30 @@ export function createRun(payload: {
   wait_for_fresh_quota?: boolean
   /** On-the-fly launch: only these queue item ids (ordered). */
   queue_item_ids?: number[]
+  /** New conversation: seed a single-project quick run with this opening message. */
+  first_message?: ConversationFirstMessage
 }): Promise<Run> {
   return api.post<Run>('/api/v1/runs', payload)
+}
+
+/**
+ * Start a new remote conversation (quick run) seeded with a first message.
+ * @param payload - Machine, single project and the opening message.
+ * @returns The created run to open in the chat view.
+ */
+export function createConversation(payload: {
+  machine_id: number
+  project_id: number
+  first_message: ConversationFirstMessage
+}): Promise<Run> {
+  return createRun({
+    machine_id: payload.machine_id,
+    project_ids: [payload.project_id],
+    quota_count: 1,
+    parallel: false,
+    wait_for_fresh_quota: false,
+    first_message: payload.first_message,
+  })
 }
 
 /**

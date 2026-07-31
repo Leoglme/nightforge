@@ -7,8 +7,21 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class RunFirstMessage(BaseModel):
+    """First free-text message that seeds a new remote conversation (Discussions hub)."""
+
+    content: str = Field(..., min_length=1)
+    claude_session_id: Optional[str] = Field(
+        default=None, max_length=64, description="Claude session UUID to resume on the machine"
+    )
+    claude_model: Optional[str] = Field(default=None, max_length=64)
+    provider: Optional[str] = Field(default=None, max_length=20)
+    effort: Optional[str] = Field(default=None, max_length=16)
+    fast_mode: bool = Field(default=False)
+
+
 class RunCreate(BaseModel):
-    """Schema for scheduling a night run (or an on-the-fly queue launch)."""
+    """Schema for scheduling a night run (or an on-the-fly queue / conversation launch)."""
 
     machine_id: int = Field(...)
     project_ids: List[int] = Field(..., min_length=1)
@@ -29,6 +42,13 @@ class RunCreate(BaseModel):
         description=(
             "When set, snapshot only these queue items as run messages "
             "(on-the-fly launch from the queue page) instead of project_messages / all pending."
+        ),
+    )
+    first_message: Optional[RunFirstMessage] = Field(
+        default=None,
+        description=(
+            "When set, start a quick single-project conversation seeded with this message "
+            "(Discussions hub). Mutually exclusive with queue_item_ids; requires exactly one project."
         ),
     )
 
@@ -54,6 +74,14 @@ class RunResponse(BaseModel):
     window_end: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime
+    # Conversation-hub enrichments (populated by the list endpoint only).
+    project_names: List[str] = Field(default_factory=list)
+    title: Optional[str] = Field(
+        default=None, description="First user message, truncated — the conversation title"
+    )
+    last_activity_at: Optional[datetime] = Field(
+        default=None, description="Most recent event/finish time, for sorting conversations"
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

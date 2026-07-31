@@ -20,6 +20,7 @@
 - [x] **Phase 5** — README + ARCHITECTURE
 - [x] **Phase 6** — Multi-comptes Cursor (coffre chiffré + page + switch au prochain prompt)
 - [x] **Phase 7** — Multi-comptes Claude (coffre OAuth + page + switch au prochain prompt)
+- [x] **Phase 8** — Discussions : hub conversationnel mobile-first (nav desktop + mobile), nouvelle conversation à distance (`POST /runs` + `first_message`), reprise de session Claude, détail = chat + revue de code réutilisés, liste `GET /runs` enrichie (`title` / `project_names` / `last_activity_at`)
 
 ## Hors scope V2
 
