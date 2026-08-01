@@ -70,6 +70,14 @@ export default defineNuxtConfig({
     },
   },
 
+  // no-cache on HTML so iOS Safari reloads the latest bundle; assets are hashed → immutable.
+  routeRules: isDesktopBuild
+    ? {}
+    : {
+        '/_nuxt/**': { headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },
+        '/**': { headers: { 'Cache-Control': 'no-cache, must-revalidate' } },
+      },
+
   compatibilityDate: '2024-07-11',
 
   nitro: isDesktopBuild ? { preset: 'static' } : undefined,
