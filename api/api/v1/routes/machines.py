@@ -8,11 +8,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
+from enums.queue_item_status import QueueItemStatus
 from models.machine import Machine
 from models.project import Project
 from models.project_machine_path import ProjectMachinePath
+from models.run import Run
+from models.run_message import RunMessage
 from models.user import User
-from schemas.claude_session import ClaudeSessionListResponse, ClaudeSessionResponse
+from schemas.claude_session import (
+    ClaudeSessionListResponse,
+    ClaudeSessionResponse,
+    SessionTranscriptEvent,
+    SessionTranscriptResponse,
+    SessionTranscriptTurn,
+)
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
 from schemas.repo_inspect import RepoInspectResponse
 from services.agent_hub import agent_hub
@@ -155,6 +164,32 @@ def _normalize_local_path(path: str) -> str:
     return path.strip().replace("\\", "/").rstrip("/").lower()
 
 
+def _project_by_path_map(db: Session, machine_id: int, user_id: int) -> dict[str, tuple[int, str]]:
+    """
+    Map each of a machine's registered clone paths to its (project_id, project_name).
+
+    Args:
+        db: Database session.
+        machine_id: The machine whose paths to map.
+        user_id: The owning user.
+
+    Returns:
+        A normalized-path → (project_id, name) lookup.
+    """
+    return {
+        _normalize_local_path(path): (project_id, name)
+        for path, project_id, name in (
+            db.query(ProjectMachinePath.local_path, Project.id, Project.name)
+            .join(Project, Project.id == ProjectMachinePath.project_id)
+            .filter(
+                ProjectMachinePath.machine_id == machine_id,
+                Project.user_id == user_id,
+            )
+            .all()
+        )
+    }
+
+
 @router.get("/{machine_id}/claude-sessions", response_model=ClaudeSessionListResponse)
 async def list_claude_sessions(
     machine_id: int,
@@ -202,14 +237,17 @@ async def list_claude_sessions(
             detail="Agent did not respond in time",
         )
 
-    project_by_path: dict[str, tuple[int, str]] = {
-        _normalize_local_path(path): (project_id, name)
-        for path, project_id, name in (
-            db.query(ProjectMachinePath.local_path, Project.id, Project.name)
-            .join(Project, Project.id == ProjectMachinePath.project_id)
+    project_by_path = _project_by_path_map(db, machine_id, current_user.id)
+
+    running_session_ids = {
+        session_id
+        for (session_id,) in (
+            db.query(RunMessage.claude_session_id)
+            .join(Run, Run.id == RunMessage.run_id)
             .filter(
-                ProjectMachinePath.machine_id == machine_id,
-                Project.user_id == current_user.id,
+                Run.user_id == current_user.id,
+                RunMessage.status == QueueItemStatus.RUNNING.value,
+                RunMessage.claude_session_id.isnot(None),
             )
             .all()
         )
@@ -227,9 +265,82 @@ async def list_claude_sessions(
                 updated_at=item["updated_at"],
                 project_id=project[0] if project else None,
                 project_name=project[1] if project else None,
+                is_running=item["session_id"] in running_session_ids,
             )
         )
     return ClaudeSessionListResponse(sessions=sessions)
+
+
+@router.get(
+    "/{machine_id}/claude-sessions/{session_id}/transcript",
+    response_model=SessionTranscriptResponse,
+)
+async def get_session_transcript(
+    machine_id: int,
+    session_id: str,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Rebuild a Claude session's full chat history from the machine's transcript.
+
+    Args:
+        machine_id: Target machine (must be online).
+        session_id: The Claude session UUID.
+        current_user: The authenticated user.
+        db: Database session.
+
+    Returns:
+        The session's turns (history) plus the project its cwd maps to, when known.
+
+    Raises:
+        HTTPException: If the machine is unknown or offline, or the agent times out.
+    """
+    machine = (
+        db.query(Machine)
+        .filter(Machine.id == machine_id, Machine.user_id == current_user.id)
+        .first()
+    )
+    if not machine:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
+
+    if not agent_hub.is_online(machine_id):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Machine offline — the session lives on the agent PC",
+        )
+
+    response = await agent_hub.request_agent(
+        machine_id,
+        {"type": "session.transcript", "session_id": session_id},
+        timeout=30.0,
+    )
+    if response is None:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Agent did not respond in time",
+        )
+
+    cwd = response.get("cwd")
+    project = _project_by_path_map(db, machine_id, current_user.id).get(_normalize_local_path(cwd)) if cwd else None
+    turns = [
+        SessionTranscriptTurn(
+            role=str(turn.get("role") or "user"),
+            content=str(turn.get("content") or ""),
+            events=[
+                SessionTranscriptEvent(level=str(ev.get("level") or "info"), message=str(ev.get("message") or ""))
+                for ev in turn.get("events", [])
+            ],
+        )
+        for turn in response.get("turns", [])
+    ]
+    return SessionTranscriptResponse(
+        session_id=session_id,
+        cwd=cwd,
+        project_id=project[0] if project else None,
+        project_name=project[1] if project else None,
+        turns=turns,
+    )
 
 
 @router.get("/{machine_id}/inspect-repo", response_model=RepoInspectResponse)

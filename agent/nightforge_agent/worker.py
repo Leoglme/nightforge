@@ -183,6 +183,8 @@ class Worker:
                 self._stop_requested = True
         elif msg_type == "sessions.list":
             await self._handle_sessions_list(message)
+        elif msg_type == "session.transcript":
+            await self._handle_session_transcript(message)
         elif msg_type == "repo.inspect":
             await self._handle_repo_inspect(message)
         elif msg_type == "run.update":
@@ -501,6 +503,26 @@ class Worker:
                 "type": "sessions.response",
                 "request_id": request_id,
                 "sessions": sessions,
+            }
+        )
+
+    async def _handle_session_transcript(self, message: dict) -> None:
+        """
+        Rebuild a Claude session's chat history and reply to the control-plane.
+
+        Args:
+            message: Command with ``session_id`` and ``request_id``.
+        """
+        session_id = message.get("session_id")
+        request_id = message.get("request_id")
+        transcript = {"session_id": session_id, "cwd": None, "turns": []}
+        if isinstance(session_id, str) and session_id.strip():
+            transcript = session_scanner.build_session_transcript(session_id.strip())
+        await self._client.send(
+            {
+                "type": "session.transcript.response",
+                "request_id": request_id,
+                **transcript,
             }
         )
 

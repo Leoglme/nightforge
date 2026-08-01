@@ -109,7 +109,7 @@ const userStore = useUserStore()
 const showUserMenu = ref(false)
 
 const isComposePage = computed(() => route.path === '/dashboard/compose')
-const isChatDetailPage = computed(() => /^\/dashboard\/chat\/\d+/.test(route.path))
+const isChatDetailPage = computed(() => /^\/dashboard\/chat\/(\d+|pc\/)/.test(route.path))
 const isFullBleed = computed(() => isComposePage.value || isChatDetailPage.value)
 
 /**

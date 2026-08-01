@@ -56,6 +56,19 @@ export function listClaudeSessions(
 }
 
 /**
+ * Fetch a Claude session's full chat history (rebuilt from its transcript on the PC).
+ * @param machineId - Machine the session lives on.
+ * @param sessionId - Claude session UUID.
+ * @returns The session transcript (turns + resolved project).
+ */
+export function getSessionTranscript(
+  machineId: number,
+  sessionId: string,
+): Promise<import('~/types').SessionTranscript> {
+  return api.get(`/api/v1/machines/${machineId}/claude-sessions/${encodeURIComponent(sessionId)}/transcript`)
+}
+
+/**
  * Inspect a local git clone on a machine (folder name + GitHub remote).
  * @param machineId - Machine id (must be online).
  * @param localPath - Absolute path on that PC.

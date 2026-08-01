@@ -163,24 +163,24 @@
     "new": {
       "title": "Nouvelle conversation",
       "subtitle": "Projet, machine, modèle — puis ton premier message.",
-      "resumeTitle": "Reprendre la session",
-      "resumeSubtitle": "Continue cette conversation Claude démarrée sur le PC.",
-      "resume": "Reprendre",
-      "resumeSessionShort": "Session {id}…",
       "noProjects": "Aucun projet. Crée ton premier projet pour démarrer une conversation.",
       "createProject": "Nouveau projet",
       "project": "Projet",
       "projectPlaceholder": "Choisir un projet",
-      "projectResumeHint": "Ce dossier n'est pas encore un projet NightForge — choisis-en un ou crée-le pour reprendre.",
       "machine": "Machine",
       "machinePlaceholder": "Choisir une machine",
       "machineOfflineHint": "Machine hors ligne — lance l'app NightForge sur ce PC pour exécuter.",
       "offlineTag": "(hors ligne)",
       "message": "Premier message",
       "messagePlaceholder": "Décris la feature ou la tâche à faire…",
-      "messagePlaceholderResume": "Optionnel — laisse vide pour « Vas-y, continue »",
       "start": "Démarrer",
       "failed": "Impossible de démarrer la conversation"
+    },
+    "session": {
+      "title": "Session",
+      "emptyTitle": "Historique vide pour cette session.",
+      "placeholder": "Continue la conversation…",
+      "unregisteredHint": "Ce dossier n'est pas un projet NightForge — enregistre-le pour continuer la conversation ici."
     }
   },
   "compose": {

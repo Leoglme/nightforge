@@ -55,7 +55,12 @@
         <span
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[var(--app-ink)]"
         >
-          <ClaudeLogo class="!h-4 !w-4" />
+          <UIcon
+            v-if="entry.session.is_running"
+            name="i-lucide-loader-circle"
+            class="h-4 w-4 animate-spin text-[var(--app-accent-ink)]"
+          />
+          <ClaudeLogo v-else class="!h-4 !w-4" />
         </span>
         <span class="min-w-0 flex-1">
           <span class="flex items-center justify-between gap-2">
@@ -118,7 +123,6 @@
       :open="newConversationOpen"
       :projects="projects"
       :machines="machines"
-      :preset="conversationPreset"
       @close="newConversationOpen = false"
       @created="onConversationCreated"
       @create-project="openCreateProject"
@@ -138,7 +142,7 @@
 
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { ClaudeSession, Machine, NewConversationPreset, Project, Run } from '~/types'
+import type { ClaudeSession, Machine, Project, Run } from '~/types'
 import { formatRelativeFr } from '~/utils/datetime'
 import { listClaudeSessions, listMachines } from '~/services/machinesService'
 import { listProjects } from '~/services/projectsService'
@@ -163,7 +167,6 @@ const pcSessions = ref<PcSession[]>([])
 const loading = ref(true)
 const newConversationOpen = ref(false)
 const createProjectOpen = ref(false)
-const conversationPreset = ref<NewConversationPreset | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 let sessionsTimer: ReturnType<typeof setInterval> | null = null
 
@@ -200,28 +203,20 @@ function sessionLocation(entry: PcSession): string {
 }
 
 /**
- * Open the new-conversation drawer (fresh, no resume).
+ * Open the new-conversation drawer.
  * @returns Nothing.
  */
 function openNewConversation(): void {
-  conversationPreset.value = null
   newConversationOpen.value = true
 }
 
 /**
- * Open the drawer to resume an on-PC session.
- * @param entry - The tagged session to resume.
+ * Open an on-PC session directly in its chat view (history + continue).
+ * @param entry - The tagged session to open.
  * @returns Nothing.
  */
 function openSession(entry: PcSession): void {
-  conversationPreset.value = {
-    machineId: entry.machineId,
-    projectId: entry.session.project_id ?? null,
-    sessionId: entry.session.session_id,
-    title: entry.session.title,
-    cwd: entry.session.cwd,
-  }
-  newConversationOpen.value = true
+  router.push(`/dashboard/chat/pc/${entry.machineId}/${entry.session.session_id}`)
 }
 
 /**

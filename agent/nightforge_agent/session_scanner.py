@@ -160,6 +160,121 @@ def list_all_sessions(limit: int = 40) -> List[ClaudeSession]:
     return sessions[:limit]
 
 
+def _find_session_file(session_id: str) -> Optional[Path]:
+    """
+    Locate a session transcript by id across every project directory.
+
+    Args:
+        session_id: The Claude session UUID.
+
+    Returns:
+        The transcript path, or None if not found.
+    """
+    projects_dir = _claude_config_dir() / "projects"
+    if not projects_dir.is_dir():
+        return None
+    for project_dir in projects_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        candidate = project_dir / f"{session_id}.jsonl"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _user_prompt_text(message: dict) -> Optional[str]:
+    """
+    Extract the user prompt of a transcript 'user' entry (None if it's only a tool result).
+
+    Args:
+        message: The ``message`` object of a user entry.
+
+    Returns:
+        The prompt text, or None.
+    """
+    content = message.get("content")
+    if isinstance(content, str):
+        return content if content.strip() else None
+    if not isinstance(content, list):
+        return None
+    parts: List[str] = []
+    for block in content:
+        if isinstance(block, str):
+            parts.append(block)
+        elif isinstance(block, dict) and block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+    text = "\n".join(part for part in parts if part.strip())
+    return text if text.strip() else None
+
+
+def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
+    """
+    Rebuild a Claude session's chat history from its transcript file.
+
+    Groups the JSONL into turns (user prompt + the assistant text / tool actions that
+    followed), reusing the same ``__NF_ACTION__`` encoding the live runner emits so the
+    web chat renders history identically to a live run.
+
+    Args:
+        session_id: The Claude session UUID.
+        max_turns: Keep only the most recent N turns.
+
+    Returns:
+        ``{"session_id", "cwd", "turns": [{"role", "content", "events": [...]}]}``.
+    """
+    from . import stream_actions
+
+    result: dict = {"session_id": session_id, "cwd": None, "turns": []}
+    path = _find_session_file(session_id)
+    if path is None:
+        return result
+
+    turns: List[dict] = []
+    current: Optional[dict] = None
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if result["cwd"] is None and isinstance(event.get("cwd"), str):
+                    result["cwd"] = event["cwd"]
+                event_type = event.get("type")
+                if event_type == "user":
+                    message = event.get("message")
+                    prompt = _user_prompt_text(message) if isinstance(message, dict) else None
+                    if prompt is not None:
+                        current = {"role": "user", "content": prompt, "events": []}
+                        turns.append(current)
+                        continue
+                    _texts, actions = stream_actions.extract_claude_assistant_parts(event)
+                    if current is not None:
+                        for action in actions:
+                            current["events"].append(
+                                {"level": "info", "message": stream_actions.encode_action(action)}
+                            )
+                elif event_type == "assistant":
+                    texts, actions = stream_actions.extract_claude_assistant_parts(event)
+                    if current is None:
+                        current = {"role": "user", "content": "", "events": []}
+                        turns.append(current)
+                    for text in texts:
+                        if text.strip():
+                            current["events"].append({"level": "info", "message": text})
+                    for action in actions:
+                        current["events"].append(
+                            {"level": "info", "message": stream_actions.encode_action(action)}
+                        )
+    except OSError:
+        return result
+
+    result["turns"] = turns[-max_turns:] if len(turns) > max_turns else turns
+    return result
+
+
 def find_latest_session_id(cwd: str, not_before: float) -> Optional[str]:
     """
     Return the session id of the newest transcript touched after a timestamp.

@@ -222,6 +222,8 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                     db.commit()
         elif msg_type == "sessions.response":
             agent_hub.resolve_request(message.get("request_id"), message)
+        elif msg_type == "session.transcript.response":
+            agent_hub.resolve_request(message.get("request_id"), message)
         elif msg_type == "repo.inspect.response":
             agent_hub.resolve_request(message.get("request_id"), message)
         elif msg_type == "quota.response":
@@ -257,6 +259,7 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
 
     if msg_type not in (
         "sessions.response",
+        "session.transcript.response",
         "repo.inspect.response",
         "quota.response",
         "cursor.usage.response",

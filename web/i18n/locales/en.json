@@ -125,24 +125,24 @@
     "new": {
       "title": "New conversation",
       "subtitle": "Project, machine, model — then your first message.",
-      "resumeTitle": "Resume session",
-      "resumeSubtitle": "Continue this Claude conversation started on the PC.",
-      "resume": "Resume",
-      "resumeSessionShort": "Session {id}…",
       "noProjects": "No project yet. Create your first project to start a conversation.",
       "createProject": "New project",
       "project": "Project",
       "projectPlaceholder": "Choose a project",
-      "projectResumeHint": "This folder isn't a NightForge project yet — pick one or create it to resume.",
       "machine": "Machine",
       "machinePlaceholder": "Choose a machine",
       "machineOfflineHint": "Machine offline — launch the NightForge app on that PC to run.",
       "offlineTag": "(offline)",
       "message": "First message",
       "messagePlaceholder": "Describe the feature or task to build…",
-      "messagePlaceholderResume": "Optional — leave empty for « Go ahead, continue »",
       "start": "Start",
       "failed": "Could not start the conversation"
+    },
+    "session": {
+      "title": "Session",
+      "emptyTitle": "No history for this session.",
+      "placeholder": "Continue the conversation…",
+      "unregisteredHint": "This folder isn't a NightForge project — register it to continue the conversation here."
     }
   },
   "compose": {

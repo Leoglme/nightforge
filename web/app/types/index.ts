@@ -313,15 +313,27 @@ export type ClaudeSession = {
   /** Registered project this session's cwd maps to, when known. */
   project_id?: number | null
   project_name?: string | null
+  /** True while NightForge is running a message that resumes this session. */
+  is_running?: boolean
 }
 
-/** Resume prefill for the new-conversation drawer (tapping an on-PC session). */
-export type NewConversationPreset = {
-  machineId: number
-  projectId?: number | null
-  sessionId: string
-  title?: string | null
+export type SessionTranscriptEvent = {
+  level: string
+  message: string
+}
+
+export type SessionTranscriptTurn = {
+  role: string
+  content: string
+  events: SessionTranscriptEvent[]
+}
+
+export type SessionTranscript = {
+  session_id: string
   cwd?: string | null
+  project_id?: number | null
+  project_name?: string | null
+  turns: SessionTranscriptTurn[]
 }
 
 export type ProjectMessage = {
