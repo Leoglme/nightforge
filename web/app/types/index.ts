@@ -335,6 +335,8 @@ export type SessionTranscript = {
   project_name?: string | null
   /** True while the session's last turn is still in progress (Claude working). */
   active?: boolean
+  /** Model alias last used in the session (opus/sonnet/…), for composer pre-selection. */
+  model?: string | null
   turns: SessionTranscriptTurn[]
 }
 

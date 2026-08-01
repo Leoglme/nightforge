@@ -112,6 +112,7 @@ let lastEventId = 0
 let replyMessageId: number | null = null
 let creatingReply = false
 let stopped = false
+let modelPreselected = false
 
 const canSend = computed(() => Boolean(newMessageText.value.trim()))
 /** Working = my message is pending, the live feed flags it, or its last turn is in progress. */
@@ -211,6 +212,13 @@ async function loadTranscript(): Promise<void> {
   const fresh = await getSessionTranscript(machineId, sessionId).catch(() => null)
   if (fresh) {
     transcript.value = fresh
+    // Pre-select the composer with the model the session actually used (once — never override a
+    // manual change the user made afterwards).
+    if (!modelPreselected && fresh.model) {
+      provider.value = 'claude'
+      model.value = fresh.model
+      modelPreselected = true
+    }
     // Hand the live overlay off to the transcript only once the reply is finished and its
     // settled turn has landed — never mid-stream (the transcript turn appears partial first).
     if (!awaitingReply.value && fresh.turns.length > preSendTurnCount.value) {
@@ -249,15 +257,28 @@ async function pollRun(): Promise<void> {
 }
 
 /**
- * Poll the transcript (and the run when continuing), then keep the view pinned to the bottom.
+ * Whether the thread is scrolled near the bottom — so streaming keeps it pinned, but a manual
+ * scroll up to read history is respected.
+ * @returns True when within ~120px of the bottom.
+ */
+function isNearBottom(): boolean {
+  const el = threadEl.value
+  if (!el) {
+    return true
+  }
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+}
+
+/**
+ * Poll the transcript (and the run when continuing), then keep the view pinned to the bottom
+ * whenever the user was already there — covering same-turn content growth, not just new turns.
  * @returns Nothing.
  */
 async function poll(): Promise<void> {
-  const previousTurns = transcript.value?.turns.length ?? 0
-  const previousEvents = liveEvents.value.length
+  const stick = isNearBottom()
   await loadTranscript()
   await pollRun()
-  if ((transcript.value?.turns.length ?? 0) !== previousTurns || liveEvents.value.length !== previousEvents) {
+  if (stick) {
     await scrollThread()
   }
 }
