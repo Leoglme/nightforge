@@ -203,7 +203,7 @@
       </ul>
     </UCard>
 
-    <NotificationsToggle />
+    <NotificationsToggle v-if="!isDesktopApp" />
   </div>
 
   <ProjectsManageDrawer :open="projectsOpen" @close="projectsOpen = false" @changed="refreshStats" />
@@ -226,6 +226,8 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const { t } = useI18n()
 const usageStore = useUsageStore()
+// Web push is PWA-only — hide the notifications card on the Tauri desktop build (native OS notifs).
+const { isDesktopApp } = useDesktopRuntime()
 
 const machines = ref<Machine[]>([])
 const projects = ref<Project[]>([])
