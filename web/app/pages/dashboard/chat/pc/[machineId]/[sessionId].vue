@@ -16,13 +16,23 @@
       <h1 class="truncate text-base font-semibold tracking-[-0.02em] text-[var(--app-ink)] sm:text-lg">
         {{ headerTitle }}
       </h1>
-      <span
-        v-if="working"
-        class="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--app-accent-ink)]"
-      >
-        <UIcon name="i-lucide-loader-circle" class="h-3.5 w-3.5 animate-spin" />
-        {{ t('runs.chat.thinking') }}
-      </span>
+      <div v-if="working" class="ml-auto inline-flex shrink-0 items-center gap-2">
+        <span class="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--app-accent-ink)]">
+          <UIcon name="i-lucide-loader-circle" class="h-3.5 w-3.5 animate-spin" />
+          {{ t('runs.chat.thinking') }}
+        </span>
+        <UButton
+          v-if="canStop"
+          size="xs"
+          color="error"
+          variant="soft"
+          icon="i-lucide-square"
+          :loading="stopping"
+          @click="stop"
+        >
+          {{ t('common.stop') }}
+        </UButton>
+      </div>
     </header>
 
     <!-- Chat thread -->
@@ -72,12 +82,12 @@
 </template>
 
 <script lang="ts" setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { AiProvider } from '~/constants/modelPresets'
 import type { ComposerImage, RunEvent, RunMessage, SessionTranscript } from '~/types'
 import { ensureProjectForPath, getSessionTranscript } from '~/services/machinesService'
-import { addRunMessage, createConversation, listRunEvents, listRunMessages } from '~/services/runsService'
+import { addRunMessage, createConversation, listRunEvents, listRunMessages, stopRun } from '~/services/runsService'
 
 /**
  * On-PC Claude session — full history rebuilt from the transcript, continued in place
@@ -92,6 +102,8 @@ const activity = useSessionActivityStore()
 
 const machineId = Number(route.params.machineId)
 const sessionId = String(route.params.sessionId)
+/** localStorage key: an unsent prompt draft, kept per session so it survives leaving the page. */
+const draftKey = `nf-draft-${machineId}-${sessionId}`
 
 const transcript = ref<SessionTranscript | null>(null)
 const loading = ref(true)
@@ -106,6 +118,7 @@ const model = ref<string | null>('sonnet')
 const effort = ref<string | null>('max')
 const fast = ref(false)
 const sending = ref(false)
+const stopping = ref(false)
 const threadEl = ref<HTMLElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let lastEventId = 0
@@ -117,6 +130,8 @@ let modelPreselected = false
 const canSend = computed(() => Boolean(newMessageText.value.trim()))
 /** Working = my message is pending, the live feed flags it, or its last turn is in progress. */
 const working = computed(() => awaitingReply.value || activity.isActive(sessionId) || Boolean(transcript.value?.active))
+/** We can only stop a reply NightForge is running (has an active run) — not a terminal session. */
+const canStop = computed(() => awaitingReply.value && activeRunId.value !== null)
 
 const headerTitle = computed(() => {
   const name = transcript.value?.project_name
@@ -365,6 +380,30 @@ async function send(images: ComposerImage[] = []): Promise<void> {
   }
 }
 
+/**
+ * Stop the reply NightForge is currently running (terminates the provider process on the PC).
+ * @returns Nothing.
+ */
+async function stop(): Promise<void> {
+  if (!activeRunId.value || stopping.value) {
+    return
+  }
+  stopping.value = true
+  try {
+    await stopRun(activeRunId.value)
+    awaitingReply.value = false
+    pendingUserMessage.value = null
+  } catch (err) {
+    toast.add({
+      title: t('common.stop'),
+      description: err instanceof Error ? err.message : undefined,
+      color: 'error',
+    })
+  } finally {
+    stopping.value = false
+  }
+}
+
 /** Self-pacing poll: snappy (1.2s) while a reply streams, relaxed (3s) when idle. */
 async function pollLoop(): Promise<void> {
   await poll()
@@ -374,7 +413,20 @@ async function pollLoop(): Promise<void> {
   timer = setTimeout(pollLoop, awaitingReply.value ? 1200 : 3000)
 }
 
+// Persist the unsent prompt as the user types; it's cleared once the message is sent.
+watch(newMessageText, (value) => {
+  if (value) {
+    localStorage.setItem(draftKey, value)
+  } else {
+    localStorage.removeItem(draftKey)
+  }
+})
+
 onMounted(async () => {
+  const draft = localStorage.getItem(draftKey)
+  if (draft) {
+    newMessageText.value = draft
+  }
   await loadTranscript()
   loading.value = false
   await scrollThread()

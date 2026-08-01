@@ -86,6 +86,8 @@ class Worker:
         self._client = WsClient(self._fresh_config, self._on_message)
         self._run_state: Optional[_RunState] = None
         self._stop_requested = False
+        #: Live provider subprocess(es) for the running message, so "stop" can terminate them.
+        self._active_processes: list = []
         self._failures = 0
         self._last_reset_hint: Optional[datetime] = None
         self._run_task: Optional[asyncio.Task] = None
@@ -222,6 +224,7 @@ class Worker:
                 self._run_state is not None and int(run_id) == self._run_state.run_id
             ):
                 self._stop_requested = True
+                self._terminate_active_processes()
         elif msg_type == "sessions.list":
             await self._handle_sessions_list(message)
         elif msg_type == "session.transcript":
@@ -1155,6 +1158,12 @@ class Worker:
                 self._mark_message_processed(message_id, failed=False)
                 return True
 
+            if self._stop_requested:
+                # The user pressed stop — the subprocess was terminated on purpose, not a failure.
+                await self._set_message_status(message_id, "SKIPPED")
+                self._mark_message_processed(message_id, failed=True)
+                return False
+
             self._failures += 1
             await self._set_message_status(message_id, "FAILED", f"exit code {exit_code}")
             self._mark_message_processed(message_id, failed=True)
@@ -1168,6 +1177,16 @@ class Worker:
         self._run_state.processed_message_ids.add(int(message_id))
         if failed:
             self._run_state.had_message_failure = True
+
+    def _terminate_active_processes(self) -> None:
+        """Terminate any live provider subprocess so a running message stops immediately."""
+        for proc in list(self._active_processes):
+            try:
+                if proc.returncode is None:
+                    proc.terminate()
+            except (ProcessLookupError, OSError) as exc:
+                logger.debug("Could not terminate process: %s", exc)
+        self._active_processes.clear()
 
     async def _run_claude(
         self,
@@ -1209,6 +1228,7 @@ class Worker:
         else:
             access_token = oauth_credentials.current_access_token()
 
+        self._active_processes.clear()
         async for line in claude_runner.run_prompt(
             self._config.claude_bin,
             cwd,
@@ -1217,6 +1237,7 @@ class Worker:
             model=model,
             effort=effort,
             access_token=access_token,
+            process_holder=self._active_processes,
         ):
             if line.startswith("__NF_RESULT__:"):
                 parts = line.split(":", 4)

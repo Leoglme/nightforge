@@ -197,6 +197,7 @@ async def run_prompt(
     model: Optional[str] = None,
     effort: Optional[str] = None,
     access_token: Optional[str] = None,
+    process_holder: Optional[list] = None,
 ) -> AsyncIterator[str]:
     """
     Run a prompt through Claude Code in headless mode, yielding output lines.
@@ -245,6 +246,9 @@ async def run_prompt(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+    # Expose the process so the worker can terminate it mid-run (user pressed "stop").
+    if process_holder is not None:
+        process_holder.append(process)
 
     quota_hit = False
     reset_hint: Optional[datetime] = None
