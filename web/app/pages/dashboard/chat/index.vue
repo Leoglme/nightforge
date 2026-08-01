@@ -56,7 +56,7 @@
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[var(--app-ink)]"
         >
           <UIcon
-            v-if="entry.session.is_running"
+            v-if="isSessionActive(entry)"
             name="i-lucide-loader-circle"
             class="h-4 w-4 animate-spin text-[var(--app-accent-ink)]"
           />
@@ -143,7 +143,7 @@
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { ClaudeSession, Machine, Project, Run } from '~/types'
-import { formatRelativeFr } from '~/utils/datetime'
+import { formatRelativeFr, parseApiDateTime } from '~/utils/datetime'
 import { listClaudeSessions, listMachines } from '~/services/machinesService'
 import { listProjects } from '~/services/projectsService'
 import { listRuns } from '~/services/runsService'
@@ -169,6 +169,10 @@ const newConversationOpen = ref(false)
 const createProjectOpen = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 let sessionsTimer: ReturnType<typeof setInterval> | null = null
+
+/** Keep a session flagged "working" for a short grace after its transcript last grew. */
+const SESSION_ACTIVE_GRACE_MS = 15000
+const sessionActivity = new Map<string, { updatedAt: string; activeUntil: number }>()
 
 const firstOnlineMachineId = computed(() => (machines.value.find((m) => m.online) ?? machines.value[0])?.id)
 const firstOnlineMachineName = computed(() => (machines.value.find((m) => m.online) ?? machines.value[0])?.name)
@@ -200,6 +204,43 @@ function sessionLocation(entry: PcSession): string {
   const folder = entry.session.cwd?.split(/[\\/]/).filter(Boolean).pop()
   const where = entry.session.project_name || folder || '—'
   return `${where} · ${entry.machineName}`
+}
+
+/**
+ * Track transcript growth between polls: a session whose file just grew is actively working.
+ * First sighting only records a baseline (not active) so existing sessions don't all light up.
+ * @param entries - The freshly fetched sessions.
+ * @returns Nothing.
+ */
+function trackActivity(entries: PcSession[]): void {
+  const now = Date.now()
+  for (const { session } of entries) {
+    const previous = sessionActivity.get(session.session_id)
+    const grew = previous ? session.updated_at > previous.updatedAt : false
+    // On first sight, a very recent write counts as active so it lights up immediately on load.
+    const recentOnLoad = !previous && now - parseApiDateTime(session.updated_at).getTime() < SESSION_ACTIVE_GRACE_MS
+    if (grew || recentOnLoad) {
+      sessionActivity.set(session.session_id, {
+        updatedAt: session.updated_at,
+        activeUntil: now + SESSION_ACTIVE_GRACE_MS,
+      })
+    } else if (!previous) {
+      sessionActivity.set(session.session_id, { updatedAt: session.updated_at, activeUntil: 0 })
+    }
+  }
+}
+
+/**
+ * Whether a session is currently working (its transcript grew recently, or NightForge runs it).
+ * @param entry - The tagged session.
+ * @returns True while active.
+ */
+function isSessionActive(entry: PcSession): boolean {
+  if (entry.session.is_running) {
+    return true
+  }
+  const activity = sessionActivity.get(entry.session.session_id)
+  return activity ? Date.now() < activity.activeUntil : false
 }
 
 /**
@@ -283,24 +324,30 @@ async function refreshSessions(): Promise<void> {
     return
   }
   const perMachine = await Promise.all(
-    online.map(async (machine): Promise<PcSession[]> => {
+    online.map(async (machine): Promise<PcSession[] | null> => {
       const response = await listClaudeSessions(machine.id).catch(() => null)
-      if (!response) {
-        return []
-      }
-      return response.sessions.map((session) => ({ session, machineId: machine.id, machineName: machine.name }))
+      return response
+        ? response.sessions.map((session) => ({ session, machineId: machine.id, machineName: machine.name }))
+        : null
     }),
   )
-  pcSessions.value = perMachine.flat().sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
+  const succeeded = perMachine.filter((result): result is PcSession[] => result !== null)
+  // All fetches failed transiently — keep the current list rather than flashing empty.
+  if (!succeeded.length && pcSessions.value.length) {
+    return
+  }
+  const flat = succeeded.flat().sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
+  trackActivity(flat)
+  pcSessions.value = flat
 }
 
 onMounted(async () => {
   projects.value = await listProjects().catch(() => [])
   await refresh()
-  loading.value = false
   await refreshSessions()
+  loading.value = false
   timer = setInterval(refresh, 8000)
-  sessionsTimer = setInterval(refreshSessions, 25000)
+  sessionsTimer = setInterval(refreshSessions, 4000)
 })
 
 onBeforeUnmount(() => {
