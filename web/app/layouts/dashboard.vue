@@ -69,7 +69,29 @@
     </aside>
 
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <!-- Pull-to-refresh indicator (mobile) -->
+      <div
+        v-if="pullDistance > 0 || refreshing"
+        class="pointer-events-none fixed inset-x-0 top-0 z-[90] flex justify-center pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden"
+        :style="{
+          transform: `translateY(${Math.min(pullDistance, 64) - 40}px)`,
+          opacity: refreshing ? 1 : Math.min(pullDistance / 72, 1),
+        }"
+      >
+        <span
+          class="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--app-line)] bg-[var(--app-surface)] shadow-[var(--app-shadow-soft)]"
+        >
+          <UIcon
+            name="i-lucide-refresh-cw"
+            class="h-4 w-4 text-[var(--app-ink-soft)]"
+            :class="refreshing ? 'animate-spin' : ''"
+            :style="refreshing ? {} : { transform: `rotate(${Math.min(pullDistance * 3, 270)}deg)` }"
+          />
+        </span>
+      </div>
+
       <main
+        ref="mainEl"
         class="min-h-0 flex-1"
         :class="isFullBleed ? 'flex flex-col overflow-hidden' : 'overflow-y-auto p-4 sm:p-6'"
       >
@@ -113,6 +135,13 @@ const showUserMenu = ref(false)
 const isComposePage = computed(() => route.path === '/dashboard/compose')
 const isChatDetailPage = computed(() => /^\/dashboard\/chat\/(\d+|pc\/)/.test(route.path))
 const isFullBleed = computed(() => isComposePage.value || isChatDetailPage.value)
+
+/** Pull-to-refresh on the scrollable content (mobile) — reloads to the latest version. */
+const mainEl = ref<HTMLElement | null>(null)
+const { pullDistance, refreshing } = usePullToRefresh(mainEl, {
+  onRefresh: () => reloadNuxtApp({ force: true }),
+  enabled: () => !isFullBleed.value,
+})
 
 /**
  * Flat navigation (no categories). Discussions is the conversation hub (chat with
