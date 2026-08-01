@@ -58,6 +58,7 @@ def init_db() -> None:
     from models.run_project import RunProject  # noqa: F401
     from models.run_event import RunEvent  # noqa: F401
     from models.run_message import RunMessage  # noqa: F401
+    from models.run_message_image import RunMessageImage  # noqa: F401
     from models.quota_snapshot import QuotaSnapshot  # noqa: F401
     from models.cursor_account import CursorAccount  # noqa: F401
     from models.claude_account import ClaudeAccount  # noqa: F401

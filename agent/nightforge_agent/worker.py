@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, Optional, Set
 
 from . import (
+    attachments,
     claude_login,
     claude_runner,
     cursor_login,
@@ -1049,6 +1050,12 @@ class Worker:
         prompt = str(message.get("content") or "").strip()
         if resume_session and not prompt:
             prompt = DEFAULT_CONTINUE_PROMPT
+
+        image_paths = attachments.materialize_images(
+            cwd, message.get("images") or [], prefix=str(message_id or "")
+        )
+        if image_paths:
+            prompt = attachments.augment_prompt_with_images(prompt, image_paths)
 
         provider = (message.get("provider") or "claude").strip().lower()
         model = message.get("claude_model") or message.get("model") or None

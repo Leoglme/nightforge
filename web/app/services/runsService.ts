@@ -14,6 +14,13 @@ export function listRuns(): Promise<Run[]> {
   return api.get<Run[]>('/api/v1/runs')
 }
 
+/** A compressed image attachment sent alongside a message (base64, no `data:` prefix). */
+export type MessageImagePayload = {
+  mime: string
+  data: string
+  filename?: string
+}
+
 /** First free-text message that seeds a new remote conversation. */
 export type ConversationFirstMessage = {
   content: string
@@ -22,6 +29,7 @@ export type ConversationFirstMessage = {
   provider?: string | null
   effort?: string | null
   fast_mode?: boolean
+  images?: MessageImagePayload[]
 }
 
 /**
@@ -182,6 +190,7 @@ export function addRunMessage(
     provider?: string | null
     effort?: string | null
     fast_mode?: boolean
+    images?: MessageImagePayload[]
   },
 ): Promise<RunMessage> {
   return api.post<RunMessage>(`/api/v1/runs/${runId}/messages`, payload)

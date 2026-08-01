@@ -6,6 +6,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from schemas.run_message import MAX_IMAGES_PER_MESSAGE, RunMessageImageInput
+
 
 class RunFirstMessage(BaseModel):
     """First free-text message that seeds a new remote conversation (Discussions hub)."""
@@ -18,6 +20,9 @@ class RunFirstMessage(BaseModel):
     provider: Optional[str] = Field(default=None, max_length=20)
     effort: Optional[str] = Field(default=None, max_length=16)
     fast_mode: bool = Field(default=False)
+    images: List[RunMessageImageInput] = Field(
+        default_factory=list, max_length=MAX_IMAGES_PER_MESSAGE
+    )
 
 
 class RunCreate(BaseModel):

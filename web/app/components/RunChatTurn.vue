@@ -21,7 +21,20 @@
             <span v-if="projectName" class="min-w-0 truncate opacity-70">· {{ projectName }}</span>
           </span>
         </div>
-        <div class="chat-md text-sm leading-relaxed break-words text-[var(--app-ink)]" v-html="userHtml" />
+        <div
+          v-if="message.content"
+          class="chat-md text-sm leading-relaxed break-words text-[var(--app-ink)]"
+          v-html="userHtml"
+        />
+        <div v-if="message.images?.length" class="mt-2 flex flex-wrap gap-1.5">
+          <img
+            v-for="(source, index) in message.images"
+            :key="index"
+            :src="source"
+            alt=""
+            class="h-20 w-20 rounded-lg border border-[var(--app-line)] object-cover"
+          />
+        </div>
       </div>
     </div>
 

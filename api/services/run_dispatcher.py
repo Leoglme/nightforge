@@ -93,6 +93,10 @@ def build_run_payload(db: Session, run: Run) -> dict:
                         "provider": message.provider or "claude",
                         "effort": message.effort,
                         "fast_mode": bool(message.fast_mode),
+                        "images": [
+                            {"mime": image.mime, "filename": image.filename, "data": image.data}
+                            for image in message.images
+                        ],
                     }
                     for message in messages
                 ],

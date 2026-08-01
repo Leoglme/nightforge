@@ -88,6 +88,10 @@
       "project": "Project",
       "placeholder": "Describe a task or ask a question.",
       "send": "Send",
+      "addImage": "Add an image",
+      "takePhoto": "Take a photo",
+      "photoLibrary": "Photo library",
+      "removeImage": "Remove image",
       "sent": "Message sent",
       "sendFailed": "Could not send the message",
       "effort": "Effort",
@@ -159,7 +163,8 @@
     "session": {
       "title": "Session",
       "emptyTitle": "No history for this session.",
-      "placeholder": "Continue the conversation…"
+      "placeholder": "Continue the conversation…",
+      "imageOnly": "Analyze the attached image(s)."
     }
   },
   "compose": {

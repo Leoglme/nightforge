@@ -353,6 +353,15 @@ export type ProjectMessage = {
   created_at: string
 }
 
+/** An image attached in the chat composer: `dataUrl` previews it, `base64` is sent to the API. */
+export type ComposerImage = {
+  id: string
+  name: string
+  mime: string
+  dataUrl: string
+  base64: string
+}
+
 export type RunMessage = {
   id: number
   run_id: number
@@ -367,4 +376,5 @@ export type RunMessage = {
   status: QueueItemStatus
   error?: string | null
   created_at: string
+  images?: string[]
 }

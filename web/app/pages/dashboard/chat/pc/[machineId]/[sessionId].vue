@@ -64,6 +64,7 @@
         :can-send="canSend"
         :loading="sending"
         :placeholder="t('chat.session.placeholder')"
+        allow-images
         @send="send"
       />
     </footer>
@@ -74,9 +75,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import type { AiProvider } from '~/constants/modelPresets'
-import type { RunEvent, RunMessage, SessionTranscript } from '~/types'
+import type { ComposerImage, RunEvent, RunMessage, SessionTranscript } from '~/types'
 import { ensureProjectForPath, getSessionTranscript } from '~/services/machinesService'
-import { addRunMessage, createConversation, listRunMessages } from '~/services/runsService'
+import { addRunMessage, createConversation, listRunEvents, listRunMessages } from '~/services/runsService'
 
 /**
  * On-PC Claude session — full history rebuilt from the transcript, continued in place
@@ -96,7 +97,8 @@ const transcript = ref<SessionTranscript | null>(null)
 const loading = ref(true)
 const activeRunId = ref<number | null>(null)
 const awaitingReply = ref(false)
-const pendingUserMessage = ref<string | null>(null)
+const pendingUserMessage = ref<{ text: string; images: string[] } | null>(null)
+const liveEvents = ref<RunEvent[]>([])
 const preSendTurnCount = ref(0)
 const newMessageText = ref('')
 const provider = ref<AiProvider | null>('claude')
@@ -105,7 +107,11 @@ const effort = ref<string | null>('max')
 const fast = ref(false)
 const sending = ref(false)
 const threadEl = ref<HTMLElement | null>(null)
-let timer: ReturnType<typeof setInterval> | null = null
+let timer: ReturnType<typeof setTimeout> | null = null
+let lastEventId = 0
+let replyMessageId: number | null = null
+let creatingReply = false
+let stopped = false
 
 const canSend = computed(() => Boolean(newMessageText.value.trim()))
 /** Working = my message is pending, the live feed flags it, or its last turn is in progress. */
@@ -126,6 +132,7 @@ const headerTitle = computed(() => {
  * @param events - The assistant text / encoded tool actions.
  * @param index - Turn index (stable key).
  * @param running - Whether this turn is the in-progress reply.
+ * @param images - Optional data URLs of just-sent images (optimistic bubble only).
  * @returns The message + events pair.
  */
 function toChatTurn(
@@ -133,6 +140,7 @@ function toChatTurn(
   events: { level: string; message: string }[],
   index: number,
   running: boolean,
+  images: string[] = [],
 ): { message: RunMessage; events: RunEvent[] } {
   return {
     message: {
@@ -145,6 +153,7 @@ function toChatTurn(
       provider: 'claude',
       status: running ? 'RUNNING' : 'DONE',
       created_at: '',
+      images: images.length ? images : undefined,
     },
     events: events.map((event, position) => ({
       id: position,
@@ -155,21 +164,32 @@ function toChatTurn(
   }
 }
 
-/** Transcript turns as RunChatTurn pairs, plus an optimistic bubble for a just-sent message. */
+/**
+ * Transcript turns as RunChatTurn pairs. While a reply is in flight, the history is frozen at
+ * pre-send and the in-flight turn streams live from the run's events (real-time, like the run
+ * view) instead of waiting on the slower on-disk transcript. The overlay is dropped once the
+ * transcript has absorbed the settled turn (see loadTranscript).
+ */
 const turns = computed(() => {
   const source = transcript.value?.turns ?? []
-  const list = source.map((turn, index) =>
-    toChatTurn(
-      turn.content,
-      turn.events,
-      index,
-      working.value && !pendingUserMessage.value && index === source.length - 1,
-    ),
-  )
-  if (awaitingReply.value && pendingUserMessage.value !== null) {
-    list.push(toChatTurn(pendingUserMessage.value, [], source.length, true))
+  if (pendingUserMessage.value !== null) {
+    const list = source
+      .slice(0, preSendTurnCount.value)
+      .map((turn, index) => toChatTurn(turn.content, turn.events, index, false))
+    list.push(
+      toChatTurn(
+        pendingUserMessage.value.text,
+        liveEvents.value.map((event) => ({ level: event.level, message: event.message })),
+        preSendTurnCount.value,
+        awaitingReply.value,
+        pendingUserMessage.value.images,
+      ),
+    )
+    return list
   }
-  return list
+  return source.map((turn, index) =>
+    toChatTurn(turn.content, turn.events, index, working.value && index === source.length - 1),
+  )
 })
 
 /**
@@ -191,7 +211,9 @@ async function loadTranscript(): Promise<void> {
   const fresh = await getSessionTranscript(machineId, sessionId).catch(() => null)
   if (fresh) {
     transcript.value = fresh
-    if (fresh.turns.length > preSendTurnCount.value) {
+    // Hand the live overlay off to the transcript only once the reply is finished and its
+    // settled turn has landed — never mid-stream (the transcript turn appears partial first).
+    if (!awaitingReply.value && fresh.turns.length > preSendTurnCount.value) {
       pendingUserMessage.value = null
     }
   }
@@ -206,8 +228,22 @@ async function pollRun(): Promise<void> {
     return
   }
   const messages = await listRunMessages(activeRunId.value).catch(() => [])
-  const last = messages[messages.length - 1]
-  if (last && (last.status === 'DONE' || last.status === 'FAILED' || last.status === 'SKIPPED')) {
+  const fresh = await listRunEvents(activeRunId.value, lastEventId).catch(() => [])
+  if (fresh.length > 0) {
+    liveEvents.value.push(...fresh)
+    lastEventId = fresh[fresh.length - 1]!.id
+  }
+  // Don't conclude "done" until this reply's message actually exists — otherwise a poll racing
+  // the send would read the previous reply's terminal status and cut the stream short.
+  if (creatingReply) {
+    return
+  }
+  const replyMessage =
+    replyMessageId !== null ? messages.find((message) => message.id === replyMessageId) : messages[messages.length - 1]
+  if (
+    replyMessage &&
+    (replyMessage.status === 'DONE' || replyMessage.status === 'FAILED' || replyMessage.status === 'SKIPPED')
+  ) {
     awaitingReply.value = false
   }
 }
@@ -218,26 +254,37 @@ async function pollRun(): Promise<void> {
  */
 async function poll(): Promise<void> {
   const previousTurns = transcript.value?.turns.length ?? 0
+  const previousEvents = liveEvents.value.length
   await loadTranscript()
   await pollRun()
-  if ((transcript.value?.turns.length ?? 0) !== previousTurns) {
+  if ((transcript.value?.turns.length ?? 0) !== previousTurns || liveEvents.value.length !== previousEvents) {
     await scrollThread()
   }
 }
 
 /**
  * Send a message: resume the session (first send creates the run, later ones append).
+ * @param images - Optional compressed image attachments from the composer.
  * @returns Nothing.
  */
-async function send(): Promise<void> {
-  const content = newMessageText.value.trim()
-  if (!content || sending.value) {
+async function send(images: ComposerImage[] = []): Promise<void> {
+  const text = newMessageText.value.trim()
+  if ((!text && !images.length) || sending.value) {
     return
   }
+  const content = text || t('chat.session.imageOnly')
+  const payloadImages = images.map((image) => ({
+    mime: image.mime,
+    data: image.base64,
+    filename: image.name,
+  }))
   sending.value = true
   preSendTurnCount.value = transcript.value?.turns.length ?? 0
-  pendingUserMessage.value = content
+  pendingUserMessage.value = { text, images: images.map((image) => image.dataUrl) }
+  liveEvents.value = []
+  lastEventId = 0
   awaitingReply.value = true
+  creatingReply = true
   newMessageText.value = ''
   await scrollThread()
   try {
@@ -265,11 +312,13 @@ async function send(): Promise<void> {
           effort: effort.value,
           fast_mode: fast.value,
           claude_session_id: sessionId,
+          images: payloadImages,
         },
       })
       activeRunId.value = run.id
+      replyMessageId = null
     } else {
-      await addRunMessage(activeRunId.value, {
+      const created = await addRunMessage(activeRunId.value, {
         project_id: projectId,
         content,
         claude_session_id: sessionId,
@@ -277,7 +326,9 @@ async function send(): Promise<void> {
         claude_model: model.value,
         effort: effort.value,
         fast_mode: fast.value,
+        images: payloadImages,
       })
+      replyMessageId = created.id
     }
   } catch (err) {
     awaitingReply.value = false
@@ -289,17 +340,28 @@ async function send(): Promise<void> {
     })
   } finally {
     sending.value = false
+    creatingReply = false
   }
+}
+
+/** Self-pacing poll: snappy (1.2s) while a reply streams, relaxed (3s) when idle. */
+async function pollLoop(): Promise<void> {
+  await poll()
+  if (stopped) {
+    return
+  }
+  timer = setTimeout(pollLoop, awaitingReply.value ? 1200 : 3000)
 }
 
 onMounted(async () => {
   await loadTranscript()
   loading.value = false
   await scrollThread()
-  timer = setInterval(poll, 3000)
+  timer = setTimeout(pollLoop, awaitingReply.value ? 1200 : 3000)
 })
 
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
+  stopped = true
+  if (timer) clearTimeout(timer)
 })
 </script>

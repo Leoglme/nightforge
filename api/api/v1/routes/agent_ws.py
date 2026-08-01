@@ -52,6 +52,7 @@ from models.quota_snapshot import QuotaSnapshot
 from models.run import Run
 from models.run_event import RunEvent
 from models.run_message import RunMessage
+from models.run_message_image import RunMessageImage
 from services import push_service
 from services.agent_hub import agent_hub
 from services.auth_service import verify_password
@@ -223,6 +224,12 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                 sync_queue_items_for_run_message(
                     db, run_message, new_status, message.get("error")
                 )
+                if new_status == QueueItemStatus.DONE.value:
+                    # The agent has written the images to the PC and Claude has read them —
+                    # drop the base64 blobs (bulk delete, never loading them into memory).
+                    db.query(RunMessageImage).filter(
+                        RunMessageImage.run_message_id == run_message.id
+                    ).delete(synchronize_session=False)
                 db.commit()
                 if new_status == QueueItemStatus.FAILED.value and old_status != QueueItemStatus.FAILED.value:
                     run = db.get(Run, run_message.run_id)

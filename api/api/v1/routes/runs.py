@@ -20,11 +20,18 @@ from models.queue_item import QueueItem
 from models.run import Run
 from models.run_event import RunEvent
 from models.run_message import RunMessage
+from models.run_message_image import RunMessageImage
 from models.run_project import RunProject
 from models.user import User
 from schemas.quota import QuotaPlanRequest
 from schemas.run import RunAddQuotas, RunCreate, RunEventResponse, RunFirstMessage, RunResponse
-from schemas.run_message import RunMessageCreate, RunMessageResponse, RunMessageRetry, RunProjectSummary
+from schemas.run_message import (
+    RunMessageCreate,
+    RunMessageImageInput,
+    RunMessageResponse,
+    RunMessageRetry,
+    RunProjectSummary,
+)
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user
 from services.quota_anchor import resolve_machine_quota_anchor
@@ -160,6 +167,28 @@ def _snapshot_queue_items(
     return count
 
 
+def _attach_images(
+    db: Session, message: RunMessage, images: list[RunMessageImageInput]
+) -> None:
+    """
+    Persist compressed PWA image attachments for a run message.
+
+    Args:
+        db: Database session (the message must already be flushed so it has an id).
+        message: The owning run message.
+        images: The validated ``RunMessageImageInput`` list from the request payload.
+    """
+    for image in images or []:
+        db.add(
+            RunMessageImage(
+                run_message_id=message.id,
+                mime=image.mime,
+                filename=(image.filename or "image")[:255],
+                data=image.data,
+            )
+        )
+
+
 def _seed_first_message(
     db: Session, run_id: int, project_id: int, first_message: RunFirstMessage
 ) -> None:
@@ -172,19 +201,20 @@ def _seed_first_message(
         project_id: The single project the conversation targets.
         first_message: The user's opening message and provider/model metadata.
     """
-    db.add(
-        RunMessage(
-            run_id=run_id,
-            project_id=project_id,
-            order_index=0,
-            content=first_message.content,
-            claude_session_id=first_message.claude_session_id,
-            claude_model=first_message.claude_model,
-            provider=first_message.provider,
-            effort=first_message.effort,
-            fast_mode=bool(first_message.fast_mode),
-        )
+    message = RunMessage(
+        run_id=run_id,
+        project_id=project_id,
+        order_index=0,
+        content=first_message.content,
+        claude_session_id=first_message.claude_session_id,
+        claude_model=first_message.claude_model,
+        provider=first_message.provider,
+        effort=first_message.effort,
+        fast_mode=bool(first_message.fast_mode),
     )
+    db.add(message)
+    db.flush()
+    _attach_images(db, message, first_message.images)
 
 
 async def _rebuild_planned_timeline(db: Session, run: Run, user_id: int) -> None:
@@ -669,6 +699,8 @@ async def add_run_message(
         status=QueueItemStatus.PENDING.value,
     )
     db.add(message)
+    db.flush()
+    _attach_images(db, message, payload.images)
 
     if run.status in (RunStatus.COMPLETED.value, RunStatus.FAILED.value, RunStatus.STOPPED.value):
         run.status = RunStatus.RUNNING.value

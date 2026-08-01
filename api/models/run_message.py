@@ -17,6 +17,7 @@ from enums.queue_item_status import QueueItemStatus
 
 if TYPE_CHECKING:
     from models.run import Run
+    from models.run_message_image import RunMessageImage
 
 
 class RunMessage(Base):
@@ -58,6 +59,12 @@ class RunMessage(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now(), nullable=False)
 
     run: Mapped["Run"] = relationship("Run", back_populates="messages")
+    images: Mapped[list["RunMessageImage"]] = relationship(
+        "RunMessageImage",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     def __repr__(self) -> str:
         """String representation of the run message."""

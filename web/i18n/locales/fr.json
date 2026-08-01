@@ -126,6 +126,10 @@
       "project": "Projet",
       "placeholder": "Décrivez une tâche ou posez une question.",
       "send": "Envoyer",
+      "addImage": "Ajouter une image",
+      "takePhoto": "Prendre une photo",
+      "photoLibrary": "Photothèque",
+      "removeImage": "Retirer l'image",
       "sent": "Message envoyé",
       "sendFailed": "Impossible d'envoyer le message",
       "effort": "Effort",
@@ -197,7 +201,8 @@
     "session": {
       "title": "Session",
       "emptyTitle": "Historique vide pour cette session.",
-      "placeholder": "Continue la conversation…"
+      "placeholder": "Continue la conversation…",
+      "imageOnly": "Analyse la ou les images jointes."
     }
   },
   "compose": {
