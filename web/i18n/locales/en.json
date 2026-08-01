@@ -20,6 +20,10 @@
     "password": "Password",
     "submit": "Sign in"
   },
+  "update": {
+    "available": "New version available",
+    "reload": "Reload"
+  },
   "common": {
     "stop": "Stop",
     "delete": "Delete",

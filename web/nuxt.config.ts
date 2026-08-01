@@ -65,6 +65,8 @@ export default defineNuxtConfig({
         (process.env.NODE_ENV === 'production' ? 'https://api.nightforge.dibodev.fr' : 'http://localhost:8010'),
       githubRepo: process.env.NUXT_PUBLIC_GITHUB_REPO || 'dibodev/nightforge',
       isDesktop: isDesktopBuild,
+      // Unique per build (baked at build time) — the web PWA polls it to offer a reload.
+      buildId: process.env.NUXT_BUILD_ID || String(Date.now()),
     },
   },
 

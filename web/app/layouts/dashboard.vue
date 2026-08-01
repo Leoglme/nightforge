@@ -1,5 +1,7 @@
 <template>
   <div class="app-theme flex h-dvh min-h-0">
+    <NightForgeWebUpdateBanner />
+
     <!-- Sidebar (desktop) — hidden on Composer to maximize workspace -->
     <aside
       v-if="!isComposePage"
@@ -81,8 +83,8 @@
           v-for="link in links"
           :key="link.to"
           :to="link.to"
-          class="relative flex min-h-14 min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-1 px-2 text-[0.7rem] text-[var(--app-ink-soft)]"
-          active-class="!text-[var(--app-ink)]"
+          class="relative flex min-h-14 min-w-[4.5rem] flex-1 flex-col items-center justify-center gap-1 px-2 text-[0.7rem]"
+          :class="isActive(link.to) ? '!text-[var(--app-ink)]' : 'text-[var(--app-ink-soft)]'"
         >
           <UIcon :name="link.icon" class="text-xl" />
           {{ link.label }}
