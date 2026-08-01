@@ -18,6 +18,13 @@ export type PushSubscriptionPayload = {
   user_agent?: string
 }
 
+/** Diagnostic result of a test notification (subscriptions = devices the server will push to). */
+export type TestNotificationResult = {
+  configured: boolean
+  subscriptions: number
+  delay_seconds: number
+}
+
 /**
  * Fetch the public VAPID key needed to subscribe.
  * @returns The key and configured flag.
@@ -45,9 +52,9 @@ export function unsubscribePush(endpoint: string): Promise<void> {
 }
 
 /**
- * Send a test notification to the current user's devices.
- * @returns Nothing.
+ * Send a (delayed) test notification and get the diagnostic back.
+ * @returns Whether push is configured, the device count, and the delay.
  */
-export function testPush(): Promise<void> {
-  return api.post('/api/v1/notifications/test')
+export function testPush(): Promise<TestNotificationResult> {
+  return api.post<TestNotificationResult>('/api/v1/notifications/test')
 }

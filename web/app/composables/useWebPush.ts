@@ -1,5 +1,5 @@
 import { onMounted, ref, type Ref } from 'vue'
-import { testPush } from '~/services/notificationsService'
+import { testPush, type TestNotificationResult } from '~/services/notificationsService'
 import {
   isPushSubscribed,
   isPushSupported,
@@ -18,7 +18,7 @@ export type UseWebPush = {
   enable: () => Promise<void>
   disable: () => Promise<void>
   toggle: (value: boolean) => Promise<void>
-  sendTest: () => Promise<void>
+  sendTest: () => Promise<TestNotificationResult>
 }
 
 /**
@@ -109,10 +109,10 @@ export function useWebPush(): UseWebPush {
 
   /**
    * Send a test notification to this user's devices.
-   * @returns Nothing.
+   * @returns The diagnostic (configured flag, device count, delay).
    */
-  async function sendTest(): Promise<void> {
-    await testPush()
+  async function sendTest(): Promise<TestNotificationResult> {
+    return await testPush()
   }
 
   onMounted(refresh)

@@ -56,8 +56,12 @@ const hint = computed(() => {
 async function test(): Promise<void> {
   testing.value = true
   try {
-    await sendTest()
-    toast.add({ title: t('notifications.testSent'), color: 'success' })
+    const result = await sendTest()
+    if (result.subscriptions === 0) {
+      toast.add({ title: t('notifications.testNoDevice'), color: 'warning' })
+    } else {
+      toast.add({ title: t('notifications.testSent', { n: result.subscriptions }), color: 'success' })
+    }
   } catch {
     toast.add({ title: t('notifications.testFailed'), color: 'error' })
   } finally {

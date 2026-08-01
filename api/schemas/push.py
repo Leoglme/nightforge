@@ -32,3 +32,11 @@ class VapidKeyResponse(BaseModel):
 
     public_key: Optional[str] = None
     configured: bool = False
+
+
+class TestNotificationResult(BaseModel):
+    """Diagnostic returned by the test endpoint so the PWA can tell where push breaks."""
+
+    configured: bool = False
+    subscriptions: int = 0
+    delay_seconds: int = 0

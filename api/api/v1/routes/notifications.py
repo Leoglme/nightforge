@@ -11,7 +11,12 @@ from core.config import settings
 from core.database import get_db
 from models.push_subscription import PushSubscription
 from models.user import User
-from schemas.push import PushSubscriptionCreate, PushSubscriptionDelete, VapidKeyResponse
+from schemas.push import (
+    PushSubscriptionCreate,
+    PushSubscriptionDelete,
+    TestNotificationResult,
+    VapidKeyResponse,
+)
 from services import push_service
 from services.auth_service import get_current_active_user
 
@@ -112,17 +117,31 @@ async def _send_test_push_after_delay(user_id: int) -> None:
     )
 
 
-@router.post("/test", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/test", response_model=TestNotificationResult)
 async def test_notification(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-) -> None:
+    db: Session = Depends(get_db),
+) -> Any:
     """
-    Schedule a test notification ~10s out, so the user can lock the phone and confirm it arrives
-    as a real background push rather than an in-app one.
+    Schedule a test notification ~10s out (so the user can lock the phone), and report how many
+    devices are subscribed — a 0 means the subscription never reached the server, which points
+    the problem at the PWA rather than delivery.
 
     Args:
         background_tasks: FastAPI background runner (fires after the response is sent).
         current_user: The authenticated user.
+        db: Database session.
+
+    Returns:
+        Whether push is configured, the subscription count, and the delay.
     """
+    subscriptions = (
+        db.query(PushSubscription).filter(PushSubscription.user_id == current_user.id).count()
+    )
     background_tasks.add_task(_send_test_push_after_delay, current_user.id)
+    return TestNotificationResult(
+        configured=push_service.is_configured(),
+        subscriptions=subscriptions,
+        delay_seconds=NOTIFICATION_TEST_DELAY_SECONDS,
+    )
