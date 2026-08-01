@@ -62,11 +62,21 @@ def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> Pus
         result.details.append("VAPID not configured")
         return result
     from pywebpush import WebPushException, webpush
+    from py_vapid import Vapid01
 
     subscriptions = (
         db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
     )
     payload = json.dumps({"title": title, "body": body, "url": url})
+    try:
+        # pywebpush treats a *string* key as a raw base64url key (Vapid.from_string) and cannot
+        # parse a PEM — load the PEM explicitly and pass the Vapid instance instead.
+        vapid = Vapid01.from_pem(pem.encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        result.failed = len(subscriptions)
+        result.details.append(f"VAPID key load failed: {str(exc)[:160]}")
+        logger.error("VAPID key load failed: %s", exc)
+        return result
     stale: List[int] = []
     for subscription in subscriptions:
         try:
@@ -76,7 +86,7 @@ def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> Pus
                     "keys": {"p256dh": subscription.p256dh, "auth": subscription.auth},
                 },
                 data=payload,
-                vapid_private_key=pem,
+                vapid_private_key=vapid,
                 vapid_claims={"sub": settings.vapid_subject},
                 ttl=3600,
             )
