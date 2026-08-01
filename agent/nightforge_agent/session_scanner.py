@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -148,6 +149,38 @@ def _session_in_progress(jsonl_path: Path) -> bool:
     if entry_type == "user":
         return True
     return False
+
+
+def list_active_session_ids(recent_seconds: float = 3600.0) -> List[str]:
+    """
+    Session ids whose last turn is still in progress — fast path for the live activity loop.
+
+    Only recently-modified transcripts are inspected: an untouched session cannot be running,
+    so this avoids tail-reading hundreds of old files every few seconds.
+
+    Args:
+        recent_seconds: Ignore transcripts not modified within this window.
+
+    Returns:
+        Active session ids.
+    """
+    projects_dir = _claude_config_dir() / "projects"
+    if not projects_dir.is_dir():
+        return []
+    now = time.time()
+    active: List[str] = []
+    for project_dir in projects_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        for jsonl_path in project_dir.glob("*.jsonl"):
+            try:
+                if now - jsonl_path.stat().st_mtime > recent_seconds:
+                    continue
+            except OSError:
+                continue
+            if _session_in_progress(jsonl_path):
+                active.append(jsonl_path.stem)
+    return active
 
 
 def list_sessions(cwd: str, limit: int = 30) -> List[ClaudeSession]:

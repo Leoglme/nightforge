@@ -94,6 +94,7 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 const { t } = useI18n()
 const route = useRoute()
 const toast = useToast()
+const activity = useSessionActivityStore()
 
 const machineId = Number(route.params.machineId)
 const sessionId = String(route.params.sessionId)
@@ -115,8 +116,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const canResume = computed(() => Boolean(transcript.value?.project_id))
 const canSend = computed(() => Boolean(newMessageText.value.trim() && canResume.value))
-/** Working = my message is pending, or the session's last turn is still in progress. */
-const working = computed(() => awaitingReply.value || Boolean(transcript.value?.active))
+/** Working = my message is pending, the live feed flags it, or its last turn is in progress. */
+const working = computed(() => awaitingReply.value || activity.isActive(sessionId) || Boolean(transcript.value?.active))
 
 const headerTitle = computed(() => {
   const name = transcript.value?.project_name

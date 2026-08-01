@@ -56,7 +56,7 @@
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[var(--app-ink)]"
         >
           <UIcon
-            v-if="entry.session.is_running"
+            v-if="isSessionActive(entry)"
             name="i-lucide-loader-circle"
             class="h-4 w-4 animate-spin text-[var(--app-accent-ink)]"
           />
@@ -159,6 +159,7 @@ definePageMeta({ layout: 'dashboard', middleware: 'auth' })
 
 const { t } = useI18n()
 const router = useRouter()
+const activity = useSessionActivityStore()
 
 const runs = ref<Run[]>([])
 const machines = ref<Machine[]>([])
@@ -200,6 +201,15 @@ function sessionLocation(entry: PcSession): string {
   const folder = entry.session.cwd?.split(/[\\/]/).filter(Boolean).pop()
   const where = entry.session.project_name || folder || '—'
   return `${where} · ${entry.machineName}`
+}
+
+/**
+ * Whether a session is currently working — live WebSocket feed first, poll as fallback.
+ * @param entry - The tagged session.
+ * @returns True while active.
+ */
+function isSessionActive(entry: PcSession): boolean {
+  return activity.isActive(entry.session.session_id) || Boolean(entry.session.is_running)
 }
 
 /**
@@ -304,7 +314,8 @@ onMounted(async () => {
   await refreshSessions()
   loading.value = false
   timer = setInterval(refresh, 8000)
-  sessionsTimer = setInterval(refreshSessions, 4000)
+  // Slower now that the live spinner comes from the WebSocket; this just refreshes the list.
+  sessionsTimer = setInterval(refreshSessions, 12000)
 })
 
 onBeforeUnmount(() => {

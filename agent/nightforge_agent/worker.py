@@ -40,6 +40,9 @@ logger = logging.getLogger(__name__)
 # night planner via ``quota_wait_until``, not from live utilization alone.
 SATURATION_THRESHOLD = 0.85
 
+# Cadence of the live session-activity push (Discussions hub spinner).
+_SESSION_ACTIVITY_INTERVAL_SECONDS = 3.0
+
 
 @dataclass
 class _MessageState:
@@ -101,8 +104,32 @@ class Worker:
         return config
 
     async def start(self) -> None:
-        """Start the WebSocket loop and the heartbeat loop concurrently."""
-        await asyncio.gather(self._client.run_forever(), self._heartbeat_loop())
+        """Start the WebSocket, heartbeat and live session-activity loops concurrently."""
+        await asyncio.gather(
+            self._client.run_forever(),
+            self._heartbeat_loop(),
+            self._session_activity_loop(),
+        )
+
+    async def _session_activity_loop(self) -> None:
+        """
+        Push the set of in-progress sessions to the control-plane whenever it changes.
+
+        Powers the live spinner in the Discussions hub without any client polling.
+        """
+        last_active: set[str] = set()
+        while True:
+            try:
+                if self._client.is_connected():
+                    active = set(session_scanner.list_active_session_ids())
+                    if active != last_active:
+                        await self._client.send(
+                            {"type": "sessions.active", "session_ids": sorted(active)}
+                        )
+                        last_active = active
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Session activity loop error: %s", exc)
+            await asyncio.sleep(_SESSION_ACTIVITY_INTERVAL_SECONDS)
 
     async def flush_quotas(self) -> None:
         """

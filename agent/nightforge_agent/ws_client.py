@@ -53,6 +53,10 @@ class WsClient:
         self._ws: Optional[Any] = None
         self._connected = asyncio.Event()
 
+    def is_connected(self) -> bool:
+        """Whether the WebSocket is currently connected."""
+        return self._connected.is_set()
+
     async def send(self, message: dict) -> None:
         """
         Send a JSON message if connected.
