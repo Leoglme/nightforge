@@ -23,6 +23,7 @@ from schemas.claude_session import (
     SessionTranscriptTurn,
 )
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
+from schemas.project import ProjectFromPath, ProjectResponse, _slugify_name
 from schemas.repo_inspect import RepoInspectResponse
 from services.agent_hub import agent_hub
 from services.auth_service import get_current_active_user, get_password_hash
@@ -342,6 +343,89 @@ async def get_session_transcript(
         active=bool(response.get("active")),
         turns=turns,
     )
+
+
+def _project_to_response(project: Project) -> ProjectResponse:
+    """Build a project response (pending count is 0 for a freshly linked project)."""
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        github_repo=project.github_repo,
+        base_branch=project.base_branch,
+        push_to_main=project.push_to_main,
+        allow_push=project.allow_push,
+        created_at=project.created_at,
+        pending_count=0,
+    )
+
+
+@router.post("/{machine_id}/ensure-project", response_model=ProjectResponse)
+async def ensure_project_for_path(
+    machine_id: int,
+    payload: ProjectFromPath,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> Any:
+    """
+    Resolve — or auto-create — the NightForge project for a machine's local folder.
+
+    Lets a user reply in an on-PC session whose folder isn't registered yet: the folder is
+    linked as a project (inspecting the git remote when the agent is online), so future
+    conversations can target it too.
+
+    Args:
+        machine_id: The machine the folder lives on.
+        payload: The local clone path.
+        current_user: The authenticated user.
+        db: Database session.
+
+    Returns:
+        The existing or newly created project.
+
+    Raises:
+        HTTPException: If the machine is not owned by the user.
+    """
+    machine = (
+        db.query(Machine)
+        .filter(Machine.id == machine_id, Machine.user_id == current_user.id)
+        .first()
+    )
+    if not machine:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Machine not found")
+
+    normalized = _normalize_local_path(payload.local_path)
+    existing = _project_by_path_map(db, machine_id, current_user.id).get(normalized)
+    if existing:
+        project = db.get(Project, existing[0])
+        if project:
+            return _project_to_response(project)
+
+    name = payload.local_path.replace("\\", "/").rstrip("/").split("/")[-1] or "projet"
+    github_repo = None
+    base_branch = "main"
+    if agent_hub.is_online(machine_id):
+        info = await agent_hub.request_agent(
+            machine_id, {"type": "repo.inspect", "local_path": payload.local_path}
+        )
+        if info:
+            name = info.get("name") or name
+            github_repo = info.get("github_repo") or None
+            base_branch = info.get("base_branch") or "main"
+
+    project = Project(
+        user_id=current_user.id,
+        name=name,
+        github_repo=github_repo or f"local/{_slugify_name(name)}",
+        base_branch=base_branch,
+    )
+    db.add(project)
+    db.flush()
+    db.add(
+        ProjectMachinePath(project_id=project.id, machine_id=machine_id, local_path=payload.local_path)
+    )
+    db.commit()
+    db.refresh(project)
+    return _project_to_response(project)
 
 
 @router.get("/{machine_id}/inspect-repo", response_model=RepoInspectResponse)

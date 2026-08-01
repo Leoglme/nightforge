@@ -197,8 +197,7 @@
     "session": {
       "title": "Session",
       "emptyTitle": "Historique vide pour cette session.",
-      "placeholder": "Continue la conversation…",
-      "unregisteredHint": "Ce dossier n'est pas un projet NightForge — enregistre-le pour continuer la conversation ici."
+      "placeholder": "Continue la conversation…"
     }
   },
   "compose": {

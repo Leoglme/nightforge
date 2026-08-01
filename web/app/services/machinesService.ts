@@ -69,6 +69,16 @@ export function getSessionTranscript(
 }
 
 /**
+ * Resolve or auto-create the project for a machine's local folder (link an on-PC session).
+ * @param machineId - The machine the folder lives on.
+ * @param localPath - The local clone path.
+ * @returns The existing or newly created project.
+ */
+export function ensureProjectForPath(machineId: number, localPath: string): Promise<import('~/types').Project> {
+  return api.post(`/api/v1/machines/${machineId}/ensure-project`, { local_path: localPath })
+}
+
+/**
  * Inspect a local git clone on a machine (folder name + GitHub remote).
  * @param machineId - Machine id (must be online).
  * @param localPath - Absolute path on that PC.

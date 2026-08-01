@@ -159,8 +159,7 @@
     "session": {
       "title": "Session",
       "emptyTitle": "No history for this session.",
-      "placeholder": "Continue the conversation…",
-      "unregisteredHint": "This folder isn't a NightForge project — register it to continue the conversation here."
+      "placeholder": "Continue the conversation…"
     }
   },
   "compose": {

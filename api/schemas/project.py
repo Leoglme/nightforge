@@ -33,6 +33,12 @@ class ProjectCreate(BaseModel):
         return text or None
 
 
+class ProjectFromPath(BaseModel):
+    """Resolve or auto-create a project from a machine's local clone path."""
+
+    local_path: str = Field(..., min_length=1, max_length=600)
+
+
 class ProjectUpdate(BaseModel):
     """Schema for updating a project."""
 

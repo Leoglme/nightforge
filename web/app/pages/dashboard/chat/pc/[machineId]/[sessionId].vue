@@ -55,14 +55,7 @@
     <footer
       class="shrink-0 border-t border-[var(--app-line)] bg-[var(--app-surface)] px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pt-3.5 sm:pb-4"
     >
-      <div
-        v-if="!loading && !canResume"
-        class="mx-auto max-w-3xl rounded-xl border border-dashed border-[var(--app-line)] px-4 py-3 text-center text-xs text-[var(--app-ink-soft)]"
-      >
-        {{ t('chat.session.unregisteredHint') }}
-      </div>
       <ChatComposer
-        v-else
         v-model:text="newMessageText"
         v-model:provider="provider"
         v-model:model="model"
@@ -82,7 +75,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import type { AiProvider } from '~/constants/modelPresets'
 import type { RunEvent, RunMessage, SessionTranscript } from '~/types'
-import { getSessionTranscript } from '~/services/machinesService'
+import { ensureProjectForPath, getSessionTranscript } from '~/services/machinesService'
 import { addRunMessage, createConversation, listRunMessages } from '~/services/runsService'
 
 /**
@@ -114,8 +107,7 @@ const sending = ref(false)
 const threadEl = ref<HTMLElement | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 
-const canResume = computed(() => Boolean(transcript.value?.project_id))
-const canSend = computed(() => Boolean(newMessageText.value.trim() && canResume.value))
+const canSend = computed(() => Boolean(newMessageText.value.trim()))
 /** Working = my message is pending, the live feed flags it, or its last turn is in progress. */
 const working = computed(() => awaitingReply.value || activity.isActive(sessionId) || Boolean(transcript.value?.active))
 
@@ -239,8 +231,7 @@ async function poll(): Promise<void> {
  */
 async function send(): Promise<void> {
   const content = newMessageText.value.trim()
-  const projectId = transcript.value?.project_id
-  if (!content || !projectId || sending.value) {
+  if (!content || sending.value) {
     return
   }
   sending.value = true
@@ -250,6 +241,19 @@ async function send(): Promise<void> {
   newMessageText.value = ''
   await scrollThread()
   try {
+    // Auto-link the session's folder as a NightForge project on the first reply.
+    let projectId = transcript.value?.project_id ?? null
+    if (!projectId && transcript.value?.cwd) {
+      const project = await ensureProjectForPath(machineId, transcript.value.cwd)
+      projectId = project.id
+      if (transcript.value) {
+        transcript.value.project_id = project.id
+        transcript.value.project_name = project.name
+      }
+    }
+    if (!projectId) {
+      throw new Error('project-unresolved')
+    }
     if (!activeRunId.value) {
       const run = await createConversation({
         machine_id: machineId,
