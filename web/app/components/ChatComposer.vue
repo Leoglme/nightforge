@@ -38,7 +38,7 @@
         :value="text"
         rows="1"
         :placeholder="placeholder || t('runs.chat.placeholder')"
-        class="max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto bg-transparent py-2.5 pr-12 pl-3.5 text-sm leading-normal text-[var(--app-ink)] outline-none placeholder:text-[var(--app-ink-soft)] sm:min-h-[2.625rem] sm:py-2.5 sm:pr-12 sm:pl-4 sm:text-[0.9375rem]"
+        class="max-h-48 min-h-[2.5rem] w-full resize-none overflow-y-auto bg-transparent py-2.5 pr-12 pl-3.5 text-base leading-normal text-[var(--app-ink)] outline-none placeholder:text-[var(--app-ink-soft)] sm:min-h-[2.625rem] sm:py-2.5 sm:pr-12 sm:pl-4"
         @input="onInput"
         @keydown.enter.exact.prevent="trySend"
       />
