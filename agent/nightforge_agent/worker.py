@@ -495,6 +495,7 @@ class Worker:
                 "title": item.title,
                 "cwd": item.cwd,
                 "updated_at": item.updated_at.isoformat(),
+                "active": item.active,
             }
             for item in scanned
         ]

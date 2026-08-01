@@ -333,6 +333,8 @@ export type SessionTranscript = {
   cwd?: string | null
   project_id?: number | null
   project_name?: string | null
+  /** True while the session's last turn is still in progress (Claude working). */
+  active?: boolean
   turns: SessionTranscriptTurn[]
 }
 

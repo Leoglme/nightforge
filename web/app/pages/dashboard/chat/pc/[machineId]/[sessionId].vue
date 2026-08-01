@@ -17,7 +17,7 @@
         {{ headerTitle }}
       </h1>
       <span
-        v-if="awaitingReply"
+        v-if="working"
         class="ml-auto inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-[var(--app-accent-ink)]"
       >
         <UIcon name="i-lucide-loader-circle" class="h-3.5 w-3.5 animate-spin" />
@@ -47,7 +47,7 @@
         :key="turn.message.id"
         :message="turn.message"
         :events="turn.events"
-        :run-status="awaitingReply ? 'RUNNING' : null"
+        :run-status="working ? 'RUNNING' : null"
       />
     </div>
 
@@ -115,6 +115,8 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const canResume = computed(() => Boolean(transcript.value?.project_id))
 const canSend = computed(() => Boolean(newMessageText.value.trim() && canResume.value))
+/** Working = my message is pending, or the session's last turn is still in progress. */
+const working = computed(() => awaitingReply.value || Boolean(transcript.value?.active))
 
 const headerTitle = computed(() => {
   const name = transcript.value?.project_name
@@ -168,7 +170,7 @@ const turns = computed(() => {
       turn.content,
       turn.events,
       index,
-      awaitingReply.value && !pendingUserMessage.value && index === source.length - 1,
+      working.value && !pendingUserMessage.value && index === source.length - 1,
     ),
   )
   if (awaitingReply.value && pendingUserMessage.value !== null) {

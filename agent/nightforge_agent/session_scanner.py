@@ -21,12 +21,14 @@ class ClaudeSession:
         title: Custom display name from the session transcript, if any.
         cwd: Working directory the session was started in.
         updated_at: Last modification time of the transcript file.
+        active: Whether the last turn is still in progress (Claude working).
     """
 
     session_id: str
     title: Optional[str]
     cwd: Optional[str]
     updated_at: datetime
+    active: bool = False
 
 
 def _claude_config_dir() -> Path:
@@ -86,6 +88,68 @@ def _parse_cwd(jsonl_path: Path) -> Optional[str]:
     return None
 
 
+_DONE_STOP_REASONS = {"end_turn", "stop_sequence", "max_tokens"}
+_TAIL_READ_BYTES = 65536
+
+
+def _read_last_json_entry(jsonl_path: Path) -> Optional[dict]:
+    """
+    Read the last complete JSON entry of a transcript without loading the whole file.
+
+    Args:
+        jsonl_path: The transcript path.
+
+    Returns:
+        The last parseable entry, or None.
+    """
+    try:
+        with jsonl_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - _TAIL_READ_BYTES))
+            chunk = handle.read()
+    except OSError:
+        return None
+    for line in reversed(chunk.decode("utf-8", errors="replace").splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            entry = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def _session_in_progress(jsonl_path: Path) -> bool:
+    """
+    Whether a session's last turn is still running (Claude working), from its last entry.
+
+    A finished turn ends with an assistant message whose ``stop_reason`` is ``end_turn``
+    (or similar); a pending tool call, or a user prompt / tool result not yet answered,
+    means Claude is still working.
+
+    Args:
+        jsonl_path: The transcript path.
+
+    Returns:
+        True while the session is actively working.
+    """
+    entry = _read_last_json_entry(jsonl_path)
+    if entry is None:
+        return False
+    entry_type = entry.get("type")
+    if entry_type == "assistant":
+        message = entry.get("message")
+        stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
+        return stop_reason == "tool_use"
+    if entry_type == "user":
+        return True
+    return False
+
+
 def list_sessions(cwd: str, limit: int = 30) -> List[ClaudeSession]:
     """
     List recent Claude Code sessions for a project directory.
@@ -115,6 +179,7 @@ def list_sessions(cwd: str, limit: int = 30) -> List[ClaudeSession]:
                 title=_parse_title(jsonl_path),
                 cwd=_parse_cwd(jsonl_path),
                 updated_at=mtime,
+                active=_session_in_progress(jsonl_path),
             )
         )
 
@@ -153,6 +218,7 @@ def list_all_sessions(limit: int = 40) -> List[ClaudeSession]:
                     title=_parse_title(jsonl_path),
                     cwd=_parse_cwd(jsonl_path),
                     updated_at=mtime,
+                    active=_session_in_progress(jsonl_path),
                 )
             )
 
@@ -224,10 +290,11 @@ def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
     """
     from . import stream_actions
 
-    result: dict = {"session_id": session_id, "cwd": None, "turns": []}
+    result: dict = {"session_id": session_id, "cwd": None, "turns": [], "active": False}
     path = _find_session_file(session_id)
     if path is None:
         return result
+    result["active"] = _session_in_progress(path)
 
     turns: List[dict] = []
     current: Optional[dict] = None

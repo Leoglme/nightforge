@@ -265,7 +265,7 @@ async def list_claude_sessions(
                 updated_at=item["updated_at"],
                 project_id=project[0] if project else None,
                 project_name=project[1] if project else None,
-                is_running=item["session_id"] in running_session_ids,
+                is_running=bool(item.get("active")) or item["session_id"] in running_session_ids,
             )
         )
     return ClaudeSessionListResponse(sessions=sessions)
@@ -339,6 +339,7 @@ async def get_session_transcript(
         cwd=cwd,
         project_id=project[0] if project else None,
         project_name=project[1] if project else None,
+        active=bool(response.get("active")),
         turns=turns,
     )
 
