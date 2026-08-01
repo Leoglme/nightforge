@@ -39,6 +39,8 @@
       <p v-else class="text-xs text-[var(--app-ink-soft)]">{{ t('chat.noDevices') }}</p>
     </section>
 
+    <NotificationsToggle />
+
     <!-- On-PC Claude sessions -->
     <section v-if="pcSessions.length" class="flex min-w-0 flex-col gap-2">
       <span class="app-label flex items-center gap-1.5">

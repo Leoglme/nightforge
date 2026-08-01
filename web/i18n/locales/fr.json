@@ -25,6 +25,19 @@
     "available": "Nouvelle version disponible",
     "reload": "Recharger"
   },
+  "notifications": {
+    "title": "Notifications",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "test": "Tester",
+    "unavailable": "Indispo ici",
+    "hintDefault": "Reçois une notif quand une session se termine, t'attend ou échoue.",
+    "hintInstall": "Sur iPhone : ajoute NightForge à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis rouvre-le pour activer.",
+    "errorPermission": "Permission refusée — autorise les notifications dans les réglages.",
+    "errorConfig": "Notifications non configurées côté serveur.",
+    "testSent": "Notification test envoyée",
+    "testFailed": "Envoi du test impossible"
+  },
   "auth": {
     "fields": {
       "name": "Nom",

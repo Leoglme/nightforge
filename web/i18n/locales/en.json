@@ -24,6 +24,19 @@
     "available": "New version available",
     "reload": "Reload"
   },
+  "notifications": {
+    "title": "Notifications",
+    "enable": "Enable",
+    "disable": "Disable",
+    "test": "Test",
+    "unavailable": "Unavailable here",
+    "hintDefault": "Get notified when a session finishes, is waiting for you, or fails.",
+    "hintInstall": "On iPhone: add NightForge to your home screen (Share → Add to Home Screen), then reopen it to enable.",
+    "errorPermission": "Permission denied — allow notifications in settings.",
+    "errorConfig": "Notifications aren't configured on the server.",
+    "testSent": "Test notification sent",
+    "testFailed": "Could not send the test"
+  },
   "common": {
     "stop": "Stop",
     "delete": "Delete",
