@@ -103,6 +103,23 @@ class Settings(BaseSettings):
         description="Groq model id for ideas expansion",
     )
 
+    # Web Push (VAPID) — mobile PWA notifications
+    vapid_public_key: Optional[str] = Field(
+        default=None,
+        alias="VAPID_PUBLIC_KEY",
+        description="VAPID public application-server key (base64url) exposed to the browser",
+    )
+    vapid_private_key_b64: Optional[str] = Field(
+        default=None,
+        alias="VAPID_PRIVATE_KEY_B64",
+        description="Base64 of the PKCS8 PEM VAPID private key used to sign push messages",
+    )
+    vapid_subject: str = Field(
+        default="mailto:contact@dibodev.fr",
+        alias="VAPID_SUBJECT",
+        description="VAPID subject (mailto: or https URL)",
+    )
+
     @property
     def cors_origins(self) -> List[str]:
         """

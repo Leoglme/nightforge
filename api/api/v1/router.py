@@ -10,6 +10,7 @@ from .routes import (
     cursor_accounts,
     health,
     machines,
+    notifications,
     project_messages,
     projects,
     quota,
@@ -27,6 +28,7 @@ router.include_router(queue.router)
 router.include_router(project_messages.router)
 router.include_router(runs.router)
 router.include_router(quota.router)
+router.include_router(notifications.router)
 router.include_router(cursor_accounts.router)
 router.include_router(claude_accounts.router)
 router.include_router(agent_ws.router)

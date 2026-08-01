@@ -52,6 +52,7 @@ from models.quota_snapshot import QuotaSnapshot
 from models.run import Run
 from models.run_event import RunEvent
 from models.run_message import RunMessage
+from services import push_service
 from services.agent_hub import agent_hub
 from services.auth_service import verify_password
 from services.queue_sync import sync_queue_items_for_run_message
@@ -192,6 +193,7 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
         elif msg_type == "run.status":
             run = db.get(Run, int(message["run_id"]))
             if run:
+                old_status = run.status
                 new_status = message.get("status", RunStatus.RUNNING.value)
                 run.status = new_status
                 if new_status == RunStatus.RUNNING.value and run.started_at is None:
@@ -203,9 +205,18 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                 ):
                     run.finished_at = datetime.utcnow()
                 db.commit()
+                if new_status != old_status:
+                    url = f"/dashboard/chat/{run.id}"
+                    if new_status == RunStatus.WAITING_QUOTA.value:
+                        await push_service.notify(run.user_id, "NightForge", "Un run attend un quota Claude.", url)
+                    elif new_status == RunStatus.FAILED.value:
+                        await push_service.notify(run.user_id, "NightForge", "Un run s'est arrêté (échec).", url)
+                    elif new_status == RunStatus.COMPLETED.value and (run.kind or "night") == "night":
+                        await push_service.notify(run.user_id, "NightForge", "Ta nuit NightForge est terminée.", url)
         elif msg_type == "message.status":
             run_message = db.get(RunMessage, int(message["message_id"]))
             if run_message:
+                old_status = run_message.status
                 new_status = message.get("status", QueueItemStatus.PENDING.value)
                 run_message.status = new_status
                 run_message.error = message.get("error")
@@ -213,6 +224,12 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                     db, run_message, new_status, message.get("error")
                 )
                 db.commit()
+                if new_status == QueueItemStatus.FAILED.value and old_status != QueueItemStatus.FAILED.value:
+                    run = db.get(Run, run_message.run_id)
+                    if run:
+                        await push_service.notify(
+                            run.user_id, "NightForge", "Une session a échoué.", f"/dashboard/chat/{run.id}"
+                        )
         elif msg_type == "message.session":
             run_message = db.get(RunMessage, int(message["message_id"]))
             if run_message:
@@ -220,6 +237,17 @@ async def _handle_agent_message(machine_id: int, message: dict) -> None:
                 if session_id:
                     run_message.claude_session_id = str(session_id)
                     db.commit()
+        elif msg_type == "session.finished":
+            machine = db.get(Machine, machine_id)
+            session_id = str(message.get("session_id") or "")
+            if machine and session_id:
+                title = str(message.get("title") or "Session Claude")
+                await push_service.notify(
+                    machine.user_id,
+                    title,
+                    "Terminé — Claude t'attend.",
+                    f"/dashboard/chat/pc/{machine_id}/{session_id}",
+                )
         elif msg_type == "sessions.response":
             agent_hub.resolve_request(message.get("request_id"), message)
         elif msg_type == "session.transcript.response":

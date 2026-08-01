@@ -61,6 +61,7 @@ def init_db() -> None:
     from models.quota_snapshot import QuotaSnapshot  # noqa: F401
     from models.cursor_account import CursorAccount  # noqa: F401
     from models.claude_account import ClaudeAccount  # noqa: F401
+    from models.push_subscription import PushSubscription  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
     _ensure_optional_columns()

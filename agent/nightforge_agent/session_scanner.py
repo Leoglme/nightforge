@@ -183,6 +183,34 @@ def list_active_session_ids(recent_seconds: float = 3600.0) -> List[str]:
     return active
 
 
+def session_is_in_progress(session_id: str) -> bool:
+    """
+    Whether a specific session's last turn is in progress — bypasses the recency filter.
+
+    Args:
+        session_id: The Claude session UUID.
+
+    Returns:
+        True if the session is still working.
+    """
+    path = _find_session_file(session_id)
+    return bool(path and _session_in_progress(path))
+
+
+def session_title(session_id: str) -> Optional[str]:
+    """
+    The custom title of a session, if any.
+
+    Args:
+        session_id: The Claude session UUID.
+
+    Returns:
+        The title or None.
+    """
+    path = _find_session_file(session_id)
+    return _parse_title(path) if path else None
+
+
 def list_sessions(cwd: str, limit: int = 30) -> List[ClaudeSession]:
     """
     List recent Claude Code sessions for a project directory.

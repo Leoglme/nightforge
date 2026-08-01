@@ -122,11 +122,24 @@ class Worker:
             try:
                 if self._client.is_connected():
                     active = set(session_scanner.list_active_session_ids())
+                    # A session leaving `active` may just be mtime-stale — confirm it truly
+                    # finished (last turn ended) before announcing it, to avoid false notifs.
+                    for session_id in list(last_active - active):
+                        if session_scanner.session_is_in_progress(session_id):
+                            active.add(session_id)
+                        else:
+                            await self._client.send(
+                                {
+                                    "type": "session.finished",
+                                    "session_id": session_id,
+                                    "title": session_scanner.session_title(session_id),
+                                }
+                            )
                     if active != last_active:
                         await self._client.send(
                             {"type": "sessions.active", "session_ids": sorted(active)}
                         )
-                        last_active = active
+                    last_active = active
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Session activity loop error: %s", exc)
             await asyncio.sleep(_SESSION_ACTIVITY_INTERVAL_SECONDS)
