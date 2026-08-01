@@ -8,7 +8,7 @@ export type AiProvider = 'claude' | 'cursor'
 
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-export interface ModelPreset {
+export type ModelPreset = {
   /** Stable id stored in DB / sent to CLI */
   id: string
   label: string
@@ -23,7 +23,7 @@ export interface ModelPreset {
   defaultFast: boolean
 }
 
-export interface ProviderOption {
+export type ProviderOption = {
   value: AiProvider
   label: string
   description: string
@@ -227,7 +227,7 @@ export function formatPromptMeta(opts: {
 }
 
 /** @deprecated Use CLAUDE_MODELS / modelPresets — kept for older imports */
-export interface ClaudeModelOption {
+export type ClaudeModelOption = {
   value: string | null
   label: string
   description?: string

@@ -6,7 +6,7 @@ import { api } from '~/services/api'
  * @module services/queueService
  */
 
-export interface QueueItemPayload {
+export type QueueItemPayload = {
   prompt: string
   title?: string | null
   provider?: AiProvider | string | null
@@ -17,13 +17,13 @@ export interface QueueItemPayload {
   created_from?: string
 }
 
-export interface IdeasExpandPayload {
+export type IdeasExpandPayload = {
   ideas: string
   machine_id?: number | null
   prefer_provider?: 'cursor' | 'claude'
 }
 
-export interface IdeasExpandResult {
+export type IdeasExpandResult = {
   summary?: string | null
   source: 'agent' | 'groq' | 'heuristic'
   provider_used?: string | null

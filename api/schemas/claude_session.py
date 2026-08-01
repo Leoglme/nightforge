@@ -14,6 +14,9 @@ class ClaudeSessionResponse(BaseModel):
     title: Optional[str] = None
     cwd: Optional[str] = None
     updated_at: datetime
+    # Resolved when the session's cwd maps to a registered project path (Discussions hub).
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
 
 
 class ClaudeSessionListResponse(BaseModel):

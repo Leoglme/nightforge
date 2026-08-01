@@ -13,7 +13,7 @@ import { computed } from 'vue'
 import type { UiCalloutProps, UiCalloutVariant } from '~/types/uiCallout'
 
 /** Resolved icon + variant key for a callout. */
-interface CalloutTokens {
+type CalloutTokens = {
   icon: string
 }
 

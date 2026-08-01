@@ -7,7 +7,7 @@ export const NF_ACTION_PREFIX = '__NF_ACTION__:'
 
 export type ChatActionKind = 'edit' | 'write' | 'read' | 'bash' | 'thinking'
 
-export interface ChatToolAction {
+export type ChatToolAction = {
   kind: ChatActionKind
   path?: string
   additions?: number
@@ -305,7 +305,7 @@ export function truncatePath(path: string, max = 42): string {
   return `${headKeep}…${sep}${file}`
 }
 
-export interface DiffLine {
+export type DiffLine = {
   type: 'add' | 'del' | 'ctx' | 'meta' | 'skip'
   text: string
   /** Display line number when available */

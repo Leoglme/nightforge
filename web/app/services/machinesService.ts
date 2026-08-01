@@ -42,17 +42,17 @@ export function deleteMachine(id: number): Promise<void> {
 }
 
 /**
- * List resumable Claude Code sessions for a local project path on a machine.
+ * List resumable Claude Code sessions on a machine.
  * @param machineId - Machine id.
- * @param localPath - Local clone path on that machine.
- * @returns Recent sessions.
+ * @param localPath - Optional project clone path; omit to list every session on the machine.
+ * @returns Recent sessions, each mapped to a project when known.
  */
 export function listClaudeSessions(
   machineId: number,
-  localPath: string,
+  localPath?: string,
 ): Promise<{ sessions: import('~/types').ClaudeSession[] }> {
-  const query = encodeURIComponent(localPath)
-  return api.get(`/api/v1/machines/${machineId}/claude-sessions?local_path=${query}`)
+  const query = localPath ? `?local_path=${encodeURIComponent(localPath)}` : ''
+  return api.get(`/api/v1/machines/${machineId}/claude-sessions${query}`)
 }
 
 /**

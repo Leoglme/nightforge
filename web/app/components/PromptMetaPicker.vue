@@ -1,7 +1,15 @@
 <template>
-  <div :class="['flex flex-col gap-2', compact ? '' : '']">
+  <div class="flex flex-col gap-2">
     <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <AppNativeSelect
+        v-if="native"
+        :model-value="provider"
+        :items="providerItems"
+        placeholder="Provider"
+        @update:model-value="onProvider($event as AiProvider | null)"
+      />
       <USelectMenu
+        v-else
         :model-value="provider"
         :items="providerItems"
         value-key="value"
@@ -12,7 +20,16 @@
         :ui="{ content: 'z-[60]' }"
         @update:model-value="onProvider"
       />
+      <AppNativeSelect
+        v-if="native"
+        :model-value="model"
+        :items="modelItems"
+        placeholder="Modèle"
+        :disabled="!provider"
+        @update:model-value="onModel($event as string | null)"
+      />
       <USelectMenu
+        v-else
         :model-value="model"
         :items="modelItems"
         value-key="value"
@@ -26,8 +43,16 @@
       />
     </div>
     <div class="flex flex-wrap items-center gap-3">
+      <AppNativeSelect
+        v-if="native && effortOptions.length"
+        :model-value="effort"
+        :items="effortOptions"
+        placeholder="Effort"
+        class="w-full min-w-[8rem] sm:w-40"
+        @update:model-value="emit('update:effort', ($event as string | null) ?? null)"
+      />
       <USelectMenu
-        v-if="effortOptions.length"
+        v-else-if="effortOptions.length"
         :model-value="effort"
         :items="effortOptions"
         value-key="value"
@@ -65,7 +90,8 @@ const props = defineProps<{
   model: string | null
   effort: string | null
   fastMode: boolean
-  compact?: boolean
+  /** Render native `<select>` pickers (mobile-friendly, no search auto-focus). */
+  native?: boolean
 }>()
 
 const emit = defineEmits<{

@@ -5,7 +5,7 @@
 
 export type UserRole = 'USER' | 'ADMIN'
 
-export interface User {
+export type User = {
   id: number
   name: string
   email: string
@@ -15,25 +15,25 @@ export interface User {
   updated_at?: string | null
 }
 
-export interface LoginCredentials {
+export type LoginCredentials = {
   email: string
   password: string
 }
 
-export interface SignupCredentials {
+export type SignupCredentials = {
   name: string
   email: string
   password: string
 }
 
-export interface TokenResponse {
+export type TokenResponse = {
   access_token: string
   token_type: string
 }
 
 export type MachineStatus = 'OFFLINE' | 'IDLE' | 'WORKING' | 'WAITING_QUOTA' | 'ERROR'
 
-export interface Machine {
+export type Machine = {
   id: number
   name: string
   status: MachineStatus
@@ -49,7 +49,7 @@ export interface MachineCreated extends Machine {
   agent_token: string
 }
 
-export interface Project {
+export type Project = {
   id: number
   name: string
   github_repo: string
@@ -60,7 +60,7 @@ export interface Project {
   pending_count: number
 }
 
-export interface RepoInspect {
+export type RepoInspect = {
   exists: boolean
   is_git: boolean
   name?: string | null
@@ -73,7 +73,7 @@ export type QueueItemStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED' | 'SKIPP
 
 export type AiProvider = 'claude' | 'cursor'
 
-export interface QueueItem {
+export type QueueItem = {
   id: number
   project_id: number
   prompt: string
@@ -93,14 +93,14 @@ export type RunStatus = 'SCHEDULED' | 'RUNNING' | 'WAITING_QUOTA' | 'COMPLETED' 
 
 export type RunKind = 'night' | 'quick'
 
-export interface QuotaWindow {
+export type QuotaWindow = {
   index: number
   starts_at: string
   resets_at: string
   estimated: boolean
 }
 
-export interface QuotaPlan {
+export type QuotaPlan = {
   windows: QuotaWindow[]
   fresh_quota_available_at: string
   wait_until?: string | null
@@ -110,7 +110,7 @@ export interface QuotaPlan {
   quota_auth_error?: string | null
 }
 
-export interface UsageBucket {
+export type UsageBucket = {
   bucket: string
   label: string
   utilization: number
@@ -119,14 +119,14 @@ export interface UsageBucket {
   created_at?: string | null
 }
 
-export interface UsageSummary {
+export type UsageSummary = {
   claude: UsageBucket[]
   cursor?: UsageBucket[] | null
   source?: string | null
   quota_auth_error?: string | null
 }
 
-export interface CursorAccount {
+export type CursorAccount = {
   id: number
   label: string
   email?: string | null
@@ -144,14 +144,14 @@ export interface CursorAccount {
   updated_at?: string | null
 }
 
-export interface CursorAccountCredentials {
+export type CursorAccountCredentials = {
   id: number
   label: string
   email?: string | null
   password?: string | null
 }
 
-export interface MachineCursorUsage {
+export type MachineCursorUsage = {
   pinned: boolean
   label: string
   email?: string | null
@@ -169,7 +169,7 @@ export interface MachineCursorUsage {
   }>
 }
 
-export interface CursorAccountsOverview {
+export type CursorAccountsOverview = {
   machine?: MachineCursorUsage | null
   accounts: CursorAccount[]
   selected_account_id?: number | null
@@ -177,7 +177,7 @@ export interface CursorAccountsOverview {
   machine_preferred?: boolean
 }
 
-export interface CursorAccountCreatePayload {
+export type CursorAccountCreatePayload = {
   email: string
   password?: string | null
   session_token?: string | null
@@ -186,7 +186,7 @@ export interface CursorAccountCreatePayload {
   label?: string
 }
 
-export interface CursorAccountUpdatePayload {
+export type CursorAccountUpdatePayload = {
   email?: string | null
   password?: string | null
   session_token?: string | null
@@ -199,7 +199,7 @@ export interface CursorAccountUpdatePayload {
   label?: string
 }
 
-export interface ClaudeAccount {
+export type ClaudeAccount = {
   id: number
   label: string
   email?: string | null
@@ -216,14 +216,14 @@ export interface ClaudeAccount {
   updated_at?: string | null
 }
 
-export interface ClaudeAccountCredentials {
+export type ClaudeAccountCredentials = {
   id: number
   label: string
   email?: string | null
   password?: string | null
 }
 
-export interface MachineClaudeUsage {
+export type MachineClaudeUsage = {
   pinned: boolean
   label: string
   email?: string | null
@@ -241,7 +241,7 @@ export interface MachineClaudeUsage {
   }>
 }
 
-export interface ClaudeAccountsOverview {
+export type ClaudeAccountsOverview = {
   machine?: MachineClaudeUsage | null
   accounts: ClaudeAccount[]
   selected_account_id?: number | null
@@ -249,7 +249,7 @@ export interface ClaudeAccountsOverview {
   machine_preferred?: boolean
 }
 
-export interface ClaudeAccountCreatePayload {
+export type ClaudeAccountCreatePayload = {
   email?: string | null
   password?: string | null
   oauth?: Record<string, unknown> | null
@@ -258,7 +258,7 @@ export interface ClaudeAccountCreatePayload {
   label?: string
 }
 
-export interface ClaudeAccountUpdatePayload {
+export type ClaudeAccountUpdatePayload = {
   email?: string | null
   password?: string | null
   oauth?: Record<string, unknown> | null
@@ -271,7 +271,7 @@ export interface ClaudeAccountUpdatePayload {
   label?: string
 }
 
-export interface Run {
+export type Run = {
   id: number
   machine_id: number
   status: RunStatus
@@ -290,7 +290,7 @@ export interface Run {
   last_activity_at?: string | null
 }
 
-export interface RunEvent {
+export type RunEvent = {
   id: number
   level: string
   message: string
@@ -298,21 +298,33 @@ export interface RunEvent {
   created_at: string
 }
 
-export interface ProjectPath {
+export type ProjectPath = {
   id: number
   project_id: number
   machine_id: number
   local_path: string
 }
 
-export interface ClaudeSession {
+export type ClaudeSession = {
   session_id: string
   title?: string | null
   cwd?: string | null
   updated_at: string
+  /** Registered project this session's cwd maps to, when known. */
+  project_id?: number | null
+  project_name?: string | null
 }
 
-export interface ProjectMessage {
+/** Resume prefill for the new-conversation drawer (tapping an on-PC session). */
+export type NewConversationPreset = {
+  machineId: number
+  projectId?: number | null
+  sessionId: string
+  title?: string | null
+  cwd?: string | null
+}
+
+export type ProjectMessage = {
   id: number
   project_id: number
   order_index: number
@@ -327,7 +339,7 @@ export interface ProjectMessage {
   created_at: string
 }
 
-export interface RunMessage {
+export type RunMessage = {
   id: number
   run_id: number
   project_id: number

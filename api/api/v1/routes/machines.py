@@ -2,13 +2,15 @@
 Machine routes — register/list machines and issue agent tokens.
 """
 import secrets
-from typing import Any, List
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from core.database import get_db
 from models.machine import Machine
+from models.project import Project
+from models.project_machine_path import ProjectMachinePath
 from models.user import User
 from schemas.claude_session import ClaudeSessionListResponse, ClaudeSessionResponse
 from schemas.machine import MachineCreate, MachineCreated, MachineResponse
@@ -140,24 +142,38 @@ async def delete_machine(
     db.commit()
 
 
+def _normalize_local_path(path: str) -> str:
+    """
+    Normalize a clone path for cross-OS comparison (slashes, trailing sep, case).
+
+    Args:
+        path: A local filesystem path from the agent PC.
+
+    Returns:
+        A comparable, normalized key.
+    """
+    return path.strip().replace("\\", "/").rstrip("/").lower()
+
+
 @router.get("/{machine_id}/claude-sessions", response_model=ClaudeSessionListResponse)
 async def list_claude_sessions(
     machine_id: int,
-    local_path: str,
+    local_path: Optional[str] = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Any:
     """
-    List resumable Claude Code sessions for a project path on a machine.
+    List resumable Claude Code sessions on a machine.
 
     Args:
         machine_id: Target machine (must be online).
-        local_path: Local clone path on that machine.
+        local_path: When set, scope to one project's clone; when omitted, list every
+            session on the machine (Discussions hub) and resolve each to a project.
         current_user: The authenticated user.
         db: Database session.
 
     Returns:
-        Recent sessions sorted by last activity.
+        Recent sessions sorted by last activity, each mapped to a project when known.
 
     Raises:
         HTTPException: If the machine is unknown or offline.
@@ -186,15 +202,33 @@ async def list_claude_sessions(
             detail="Agent did not respond in time",
         )
 
-    sessions = [
-        ClaudeSessionResponse(
-            session_id=item["session_id"],
-            title=item.get("title"),
-            cwd=item.get("cwd"),
-            updated_at=item["updated_at"],
+    project_by_path: dict[str, tuple[int, str]] = {
+        _normalize_local_path(path): (project_id, name)
+        for path, project_id, name in (
+            db.query(ProjectMachinePath.local_path, Project.id, Project.name)
+            .join(Project, Project.id == ProjectMachinePath.project_id)
+            .filter(
+                ProjectMachinePath.machine_id == machine_id,
+                Project.user_id == current_user.id,
+            )
+            .all()
         )
-        for item in response.get("sessions", [])
-    ]
+    }
+
+    sessions = []
+    for item in response.get("sessions", []):
+        cwd = item.get("cwd")
+        project = project_by_path.get(_normalize_local_path(cwd)) if cwd else None
+        sessions.append(
+            ClaudeSessionResponse(
+                session_id=item["session_id"],
+                title=item.get("title"),
+                cwd=cwd,
+                updated_at=item["updated_at"],
+                project_id=project[0] if project else None,
+                project_name=project[1] if project else None,
+            )
+        )
     return ClaudeSessionListResponse(sessions=sessions)
 
 

@@ -61,7 +61,7 @@ export function importMachineClaudeSession(): Promise<ClaudeAccount> {
   return api.post<ClaudeAccount>('/api/v1/claude-accounts/import-machine')
 }
 
-export interface ClaudeLoginStart {
+export type ClaudeLoginStart = {
   login_id: string
   login_url?: string | null
   status: string
@@ -72,7 +72,7 @@ export interface ClaudeLoginStart {
   machine_id?: number
 }
 
-export interface ClaudeLoginResult {
+export type ClaudeLoginResult = {
   status: string
   oauth?: Record<string, unknown> | null
   email?: string | null

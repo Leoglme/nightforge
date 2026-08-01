@@ -39,13 +39,61 @@
       <p v-else class="text-xs text-[var(--app-ink-soft)]">{{ t('chat.noDevices') }}</p>
     </section>
 
-    <!-- Conversations -->
+    <!-- On-PC Claude sessions -->
+    <section v-if="pcSessions.length" class="flex min-w-0 flex-col gap-2">
+      <span class="app-label flex items-center gap-1.5">
+        <UIcon name="i-lucide-laptop" class="text-[var(--app-accent)]" />
+        {{ t('chat.pcSessions') }}
+      </span>
+      <button
+        v-for="entry in pcSessions"
+        :key="`${entry.machineId}:${entry.session.session_id}`"
+        type="button"
+        class="group flex items-center gap-3 rounded-xl border border-[var(--app-line)] bg-[var(--app-surface)] px-3 py-3 text-left transition-colors duration-200 hover:border-[var(--app-ink-soft)] hover:bg-[var(--app-surface-2)] sm:px-4"
+        @click="openSession(entry)"
+      >
+        <span
+          class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--app-line)] bg-[var(--app-bg)] text-[var(--app-ink)]"
+        >
+          <ClaudeLogo class="!h-4 !w-4" />
+        </span>
+        <span class="min-w-0 flex-1">
+          <span class="flex items-center justify-between gap-2">
+            <span class="truncate text-sm font-medium text-[var(--app-ink)]">{{ sessionTitle(entry.session) }}</span>
+            <span class="shrink-0 text-xs text-[var(--app-ink-soft)] tabular-nums">
+              {{ formatRelativeFr(entry.session.updated_at) }}
+            </span>
+          </span>
+          <span class="mt-1 flex flex-wrap items-center gap-x-1.5 text-xs text-[var(--app-ink-soft)]">
+            <span class="truncate">{{ sessionLocation(entry) }}</span>
+            <span v-if="!entry.session.project_id" class="italic opacity-80">
+              · {{ t('chat.sessionUnregistered') }}
+            </span>
+          </span>
+        </span>
+        <UIcon
+          name="i-lucide-play"
+          class="h-4 w-4 shrink-0 text-[var(--app-faint)] transition-transform duration-200 group-hover:translate-x-0.5"
+          aria-hidden="true"
+        />
+      </button>
+    </section>
+
+    <!-- NightForge conversations -->
     <section class="flex min-w-0 flex-col gap-2">
+      <span v-if="pcSessions.length && runs.length" class="app-label flex items-center gap-1.5">
+        <UIcon name="i-lucide-messages-square" class="text-[var(--app-accent)]" />
+        {{ t('chat.conversations') }}
+      </span>
+
       <div v-if="loading" class="flex justify-center py-10">
         <UIcon name="i-lucide-loader-circle" class="animate-spin text-2xl text-[var(--app-ink-soft)]" />
       </div>
 
-      <div v-else-if="!runs.length" class="app-card flex flex-col items-center gap-3 px-6 py-12 text-center">
+      <div
+        v-else-if="!runs.length && !pcSessions.length"
+        class="app-card flex flex-col items-center gap-3 px-6 py-12 text-center"
+      >
         <UIcon name="i-lucide-messages-square" class="text-3xl text-[var(--app-ink-soft)]" />
         <p class="max-w-sm text-sm text-[var(--app-ink-soft)]">{{ t('chat.emptyHint') }}</p>
         <UButton color="primary" icon="i-lucide-plus" @click="openNewConversation">
@@ -59,7 +107,7 @@
     <!-- Floating action button (mobile) -->
     <button
       type="button"
-      class="fixed right-4 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-2 rounded-full bg-[var(--app-ink)] px-4 py-3 text-sm font-medium text-[var(--app-surface)] shadow-[var(--app-shadow-soft)] transition-transform duration-200 active:scale-95 sm:hidden"
+      class="fixed right-4 bottom-[calc(5.75rem+env(safe-area-inset-bottom))] z-30 flex items-center gap-2 rounded-full bg-[var(--app-ink)] px-4 py-3 text-sm font-medium text-[var(--app-surface)] shadow-[var(--app-shadow-soft)] transition-transform duration-200 active:scale-95 sm:hidden"
       @click="openNewConversation"
     >
       <UIcon name="i-lucide-plus" class="h-4 w-4" />
@@ -70,6 +118,7 @@
       :open="newConversationOpen"
       :projects="projects"
       :machines="machines"
+      :preset="conversationPreset"
       @close="newConversationOpen = false"
       @created="onConversationCreated"
       @create-project="openCreateProject"
@@ -89,10 +138,14 @@
 
 <script lang="ts" setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import type { Machine, Project, Run } from '~/types'
-import { listMachines } from '~/services/machinesService'
+import type { ClaudeSession, Machine, NewConversationPreset, Project, Run } from '~/types'
+import { formatRelativeFr } from '~/utils/datetime'
+import { listClaudeSessions, listMachines } from '~/services/machinesService'
 import { listProjects } from '~/services/projectsService'
 import { listRuns } from '~/services/runsService'
+
+/** A Claude session found on a machine, tagged with which machine it lives on. */
+type PcSession = { session: ClaudeSession; machineId: number; machineName: string }
 
 /**
  * Discussions hub — the conversation-first entry point (start / resume Claude Code
@@ -106,10 +159,13 @@ const router = useRouter()
 const runs = ref<Run[]>([])
 const machines = ref<Machine[]>([])
 const projects = ref<Project[]>([])
+const pcSessions = ref<PcSession[]>([])
 const loading = ref(true)
 const newConversationOpen = ref(false)
 const createProjectOpen = ref(false)
+const conversationPreset = ref<NewConversationPreset | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
+let sessionsTimer: ReturnType<typeof setInterval> | null = null
 
 const firstOnlineMachineId = computed(() => (machines.value.find((m) => m.online) ?? machines.value[0])?.id)
 const firstOnlineMachineName = computed(() => (machines.value.find((m) => m.online) ?? machines.value[0])?.name)
@@ -124,10 +180,47 @@ function machineFor(machineId: number): Machine | null {
 }
 
 /**
- * Open the new-conversation drawer.
+ * Display title for an on-PC session.
+ * @param session - The Claude session.
+ * @returns The custom title or a short id fallback.
+ */
+function sessionTitle(session: ClaudeSession): string {
+  return session.title || t('chat.sessionShort', { id: session.session_id.slice(0, 8) })
+}
+
+/**
+ * Secondary line for an on-PC session: project name (or folder) + machine.
+ * @param entry - The tagged session.
+ * @returns The location label.
+ */
+function sessionLocation(entry: PcSession): string {
+  const folder = entry.session.cwd?.split(/[\\/]/).filter(Boolean).pop()
+  const where = entry.session.project_name || folder || '—'
+  return `${where} · ${entry.machineName}`
+}
+
+/**
+ * Open the new-conversation drawer (fresh, no resume).
  * @returns Nothing.
  */
 function openNewConversation(): void {
+  conversationPreset.value = null
+  newConversationOpen.value = true
+}
+
+/**
+ * Open the drawer to resume an on-PC session.
+ * @param entry - The tagged session to resume.
+ * @returns Nothing.
+ */
+function openSession(entry: PcSession): void {
+  conversationPreset.value = {
+    machineId: entry.machineId,
+    projectId: entry.session.project_id ?? null,
+    sessionId: entry.session.session_id,
+    title: entry.session.title,
+    cwd: entry.session.cwd,
+  }
   newConversationOpen.value = true
 }
 
@@ -184,14 +277,39 @@ async function refresh(): Promise<void> {
   machines.value = freshMachines
 }
 
+/**
+ * Refresh the on-PC Claude sessions of every online machine.
+ * @returns Nothing.
+ */
+async function refreshSessions(): Promise<void> {
+  const online = machines.value.filter((m) => m.online)
+  if (!online.length) {
+    pcSessions.value = []
+    return
+  }
+  const perMachine = await Promise.all(
+    online.map(async (machine): Promise<PcSession[]> => {
+      const response = await listClaudeSessions(machine.id).catch(() => null)
+      if (!response) {
+        return []
+      }
+      return response.sessions.map((session) => ({ session, machineId: machine.id, machineName: machine.name }))
+    }),
+  )
+  pcSessions.value = perMachine.flat().sort((a, b) => b.session.updated_at.localeCompare(a.session.updated_at))
+}
+
 onMounted(async () => {
   projects.value = await listProjects().catch(() => [])
   await refresh()
   loading.value = false
+  await refreshSessions()
   timer = setInterval(refresh, 8000)
+  sessionsTimer = setInterval(refreshSessions, 25000)
 })
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (sessionsTimer) clearInterval(sessionsTimer)
 })
 </script>

@@ -122,6 +122,44 @@ def list_sessions(cwd: str, limit: int = 30) -> List[ClaudeSession]:
     return sessions[:limit]
 
 
+def list_all_sessions(limit: int = 40) -> List[ClaudeSession]:
+    """
+    List recent Claude Code sessions across every project directory on the machine.
+
+    Args:
+        limit: Maximum sessions to return.
+
+    Returns:
+        Sessions from all projects, most recently updated first.
+    """
+    projects_dir = _claude_config_dir() / "projects"
+    if not projects_dir.is_dir():
+        return []
+
+    sessions: List[ClaudeSession] = []
+    for project_dir in projects_dir.iterdir():
+        if not project_dir.is_dir():
+            continue
+        for jsonl_path in project_dir.glob("*.jsonl"):
+            if not jsonl_path.is_file():
+                continue
+            try:
+                mtime = datetime.fromtimestamp(jsonl_path.stat().st_mtime, tz=timezone.utc)
+            except OSError:
+                continue
+            sessions.append(
+                ClaudeSession(
+                    session_id=jsonl_path.stem,
+                    title=_parse_title(jsonl_path),
+                    cwd=_parse_cwd(jsonl_path),
+                    updated_at=mtime,
+                )
+            )
+
+    sessions.sort(key=lambda item: item.updated_at, reverse=True)
+    return sessions[:limit]
+
+
 def find_latest_session_id(cwd: str, not_before: float) -> Optional[str]:
     """
     Return the session id of the newest transcript touched after a timestamp.

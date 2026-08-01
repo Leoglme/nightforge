@@ -61,7 +61,7 @@ export function importMachineCursorSession(): Promise<CursorAccount> {
   return api.post<CursorAccount>('/api/v1/cursor-accounts/import-machine')
 }
 
-export interface CursorLoginStart {
+export type CursorLoginStart = {
   login_id: string
   login_url?: string | null
   status: string
@@ -73,7 +73,7 @@ export interface CursorLoginStart {
   email?: string | null
 }
 
-export interface CursorLoginResult {
+export type CursorLoginResult = {
   status: string
   session_token?: string | null
   email?: string | null

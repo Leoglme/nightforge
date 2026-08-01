@@ -481,17 +481,21 @@ class Worker:
         """
         local_path = message.get("local_path")
         request_id = message.get("request_id")
-        sessions = []
+        # No local_path → list every session on the machine (Discussions hub);
+        # a local_path scopes the scan to that project's clone.
         if isinstance(local_path, str) and local_path.strip():
-            for item in session_scanner.list_sessions(local_path.strip()):
-                sessions.append(
-                    {
-                        "session_id": item.session_id,
-                        "title": item.title,
-                        "cwd": item.cwd,
-                        "updated_at": item.updated_at.isoformat(),
-                    }
-                )
+            scanned = session_scanner.list_sessions(local_path.strip())
+        else:
+            scanned = session_scanner.list_all_sessions()
+        sessions = [
+            {
+                "session_id": item.session_id,
+                "title": item.title,
+                "cwd": item.cwd,
+                "updated_at": item.updated_at.isoformat(),
+            }
+            for item in scanned
+        ]
         await self._client.send(
             {
                 "type": "sessions.response",

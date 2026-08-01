@@ -15,7 +15,7 @@ export function listRuns(): Promise<Run[]> {
 }
 
 /** First free-text message that seeds a new remote conversation. */
-export interface ConversationFirstMessage {
+export type ConversationFirstMessage = {
   content: string
   claude_session_id?: string | null
   claude_model?: string | null
@@ -150,7 +150,7 @@ export function addRunQuotas(runId: number, add: number): Promise<Run> {
   return api.post<Run>(`/api/v1/runs/${runId}/quotas`, { add })
 }
 
-export interface RunProjectSummary {
+export type RunProjectSummary = {
   project_id: number
   name: string
   order_index: number
