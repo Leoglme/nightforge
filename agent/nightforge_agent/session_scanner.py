@@ -90,18 +90,22 @@ def _parse_cwd(jsonl_path: Path) -> Optional[str]:
 
 
 _DONE_STOP_REASONS = {"end_turn", "stop_sequence", "max_tokens"}
-_TAIL_READ_BYTES = 65536
+_CONVERSATIONAL_TYPES = {"assistant", "user"}
+_TAIL_READ_BYTES = 131072
 
 
-def _read_last_json_entry(jsonl_path: Path) -> Optional[dict]:
+def _last_conversational_entry(jsonl_path: Path) -> Optional[dict]:
     """
-    Read the last complete JSON entry of a transcript without loading the whole file.
+    Read the last assistant/user entry of a transcript, skipping the metadata lines Claude Code
+    interleaves (``mode``, ``attachment``, ``last-prompt``, ``custom-title``, ``system``,
+    ``queue-operation``…). Any of those taken as "the last entry" would wrongly read as a
+    finished turn — the cause of the status dropping during a reasoning pause.
 
     Args:
         jsonl_path: The transcript path.
 
     Returns:
-        The last parseable entry, or None.
+        The last conversational entry, or None.
     """
     try:
         with jsonl_path.open("rb") as handle:
@@ -119,18 +123,20 @@ def _read_last_json_entry(jsonl_path: Path) -> Optional[dict]:
             entry = json.loads(stripped)
         except json.JSONDecodeError:
             continue
-        if isinstance(entry, dict):
+        if isinstance(entry, dict) and entry.get("type") in _CONVERSATIONAL_TYPES:
             return entry
     return None
 
 
 def _session_in_progress(jsonl_path: Path) -> bool:
     """
-    Whether a session's last turn is still running (Claude working), from its last entry.
+    Whether a session's last turn is still running (Claude working), from its last real turn.
 
-    A finished turn ends with an assistant message whose ``stop_reason`` is ``end_turn``
-    (or similar); a pending tool call, or a user prompt / tool result not yet answered,
-    means Claude is still working.
+    A turn is finished only when the last conversational entry is an assistant message with a
+    terminal ``stop_reason`` (``end_turn`` / ``stop_sequence`` / ``max_tokens``). A pending tool
+    call, a not-yet-answered user prompt or tool result, or any non-terminal / streaming
+    assistant block (text, thinking, tool_use) means Claude is still working — including during
+    a reasoning pause, when the last raw line is often a metadata entry rather than the turn.
 
     Args:
         jsonl_path: The transcript path.
@@ -138,17 +144,14 @@ def _session_in_progress(jsonl_path: Path) -> bool:
     Returns:
         True while the session is actively working.
     """
-    entry = _read_last_json_entry(jsonl_path)
+    entry = _last_conversational_entry(jsonl_path)
     if entry is None:
         return False
-    entry_type = entry.get("type")
-    if entry_type == "assistant":
-        message = entry.get("message")
-        stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
-        return stop_reason == "tool_use"
-    if entry_type == "user":
+    if entry.get("type") == "user":
         return True
-    return False
+    message = entry.get("message")
+    stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
+    return stop_reason not in _DONE_STOP_REASONS
 
 
 def list_active_session_ids(recent_seconds: float = 3600.0) -> List[str]:
@@ -334,6 +337,28 @@ def _user_prompt_text(message: dict) -> Optional[str]:
     return text if text.strip() else None
 
 
+_MODEL_ALIASES = ("opus", "sonnet", "haiku", "fable")
+
+
+def _model_alias(model_id: Optional[str]) -> Optional[str]:
+    """
+    Map a full Claude model id (e.g. ``claude-opus-4-8``) to the web's short alias.
+
+    Args:
+        model_id: The raw model id recorded in a transcript's assistant message.
+
+    Returns:
+        One of ``opus`` / ``sonnet`` / ``haiku`` / ``fable``, or None if unknown.
+    """
+    if not model_id:
+        return None
+    lowered = model_id.lower()
+    for alias in _MODEL_ALIASES:
+        if alias in lowered:
+            return alias
+    return None
+
+
 def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
     """
     Rebuild a Claude session's chat history from its transcript file.
@@ -351,7 +376,7 @@ def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
     """
     from . import stream_actions
 
-    result: dict = {"session_id": session_id, "cwd": None, "turns": [], "active": False}
+    result: dict = {"session_id": session_id, "cwd": None, "turns": [], "active": False, "model": None}
     path = _find_session_file(session_id)
     if path is None:
         return result
@@ -359,6 +384,7 @@ def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
 
     turns: List[dict] = []
     current: Optional[dict] = None
+    last_model: Optional[str] = None
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             for line in handle:
@@ -385,6 +411,9 @@ def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
                                 {"level": "info", "message": stream_actions.encode_action(action)}
                             )
                 elif event_type == "assistant":
+                    message = event.get("message")
+                    if isinstance(message, dict) and isinstance(message.get("model"), str):
+                        last_model = message["model"]
                     texts, actions = stream_actions.extract_claude_assistant_parts(event)
                     if current is None:
                         current = {"role": "user", "content": "", "events": []}
@@ -400,6 +429,7 @@ def build_session_transcript(session_id: str, max_turns: int = 200) -> dict:
         return result
 
     result["turns"] = turns[-max_turns:] if len(turns) > max_turns else turns
+    result["model"] = _model_alias(last_model)
     return result
 
 

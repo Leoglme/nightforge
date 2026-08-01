@@ -50,4 +50,5 @@ class SessionTranscriptResponse(BaseModel):
     project_id: Optional[int] = None
     project_name: Optional[str] = None
     active: bool = False
+    model: Optional[str] = None
     turns: List[SessionTranscriptTurn] = Field(default_factory=list)

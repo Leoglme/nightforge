@@ -341,6 +341,7 @@ async def get_session_transcript(
         project_id=project[0] if project else None,
         project_name=project[1] if project else None,
         active=bool(response.get("active")),
+        model=response.get("model") if isinstance(response.get("model"), str) else None,
         turns=turns,
     )
 
