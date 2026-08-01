@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import logging
+from dataclasses import dataclass, field
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,15 @@ from core.database import SessionLocal
 from models.push_subscription import PushSubscription
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PushResult:
+    """Outcome of a push send — surfaced to the test endpoint to diagnose delivery failures."""
+
+    delivered: int = 0
+    failed: int = 0
+    details: List[str] = field(default_factory=list)
 
 
 def is_configured() -> bool:
@@ -32,7 +42,7 @@ def _vapid_private_pem() -> Optional[str]:
         return None
 
 
-def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> int:
+def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> PushResult:
     """
     Send a Web Push notification to every subscription of a user (blocking).
 
@@ -44,18 +54,19 @@ def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> int
         url: In-app path to open on click.
 
     Returns:
-        Number of notifications delivered.
+        The delivery outcome (delivered / failed counts + per-failure detail).
     """
+    result = PushResult()
     pem = _vapid_private_pem()
     if not pem:
-        return 0
+        result.details.append("VAPID not configured")
+        return result
     from pywebpush import WebPushException, webpush
 
     subscriptions = (
         db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
     )
     payload = json.dumps({"title": title, "body": body, "url": url})
-    delivered = 0
     stale: List[int] = []
     for subscription in subscriptions:
         try:
@@ -69,14 +80,17 @@ def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> int
                 vapid_claims={"sub": settings.vapid_subject},
                 ttl=3600,
             )
-            delivered += 1
+            result.delivered += 1
         except WebPushException as exc:
             status = getattr(exc.response, "status_code", None)
+            result.failed += 1
+            result.details.append(f"HTTP {status}: {str(exc)[:160]}")
+            logger.warning("Push failed (user=%s status=%s): %s", user_id, status, exc)
             if status in (404, 410):
                 stale.append(subscription.id)
-            else:
-                logger.warning("Push failed (user=%s status=%s): %s", user_id, status, exc)
         except Exception as exc:  # noqa: BLE001
+            result.failed += 1
+            result.details.append(str(exc)[:160])
             logger.warning("Push error (user=%s): %s", user_id, exc)
 
     if stale:
@@ -84,7 +98,7 @@ def send_push(db: Session, user_id: int, title: str, body: str, url: str) -> int
             synchronize_session=False
         )
         db.commit()
-    return delivered
+    return result
 
 
 async def notify(user_id: int, title: str, body: str, url: str = "/dashboard/chat") -> None:

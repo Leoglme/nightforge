@@ -59,8 +59,14 @@ async function test(): Promise<void> {
     const result = await sendTest()
     if (result.subscriptions === 0) {
       toast.add({ title: t('notifications.testNoDevice'), color: 'warning' })
+    } else if (result.failed > 0) {
+      toast.add({
+        title: t('notifications.testRejected'),
+        description: result.detail ?? undefined,
+        color: 'error',
+      })
     } else {
-      toast.add({ title: t('notifications.testSent', { n: result.subscriptions }), color: 'success' })
+      toast.add({ title: t('notifications.testDelivered', { n: result.delivered }), color: 'success' })
     }
   } catch {
     toast.add({ title: t('notifications.testFailed'), color: 'error' })

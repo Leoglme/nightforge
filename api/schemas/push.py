@@ -39,4 +39,6 @@ class TestNotificationResult(BaseModel):
 
     configured: bool = False
     subscriptions: int = 0
-    delay_seconds: int = 0
+    delivered: int = 0
+    failed: int = 0
+    detail: Optional[str] = None

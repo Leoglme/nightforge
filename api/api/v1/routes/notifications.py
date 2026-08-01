@@ -1,10 +1,9 @@
 """
 Web Push notification routes — VAPID key, subscribe/unsubscribe, test.
 """
-import asyncio
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from core.config import settings
@@ -96,52 +95,37 @@ async def unsubscribe(
     db.commit()
 
 
-#: Delay before the test push fires, so the user can lock the phone and confirm it arrives
-#: as a real background notification (not just an in-app one).
-NOTIFICATION_TEST_DELAY_SECONDS = 10
-
-
-async def _send_test_push_after_delay(user_id: int) -> None:
-    """
-    Wait, then deliver the test push (own DB session, off the event loop).
-
-    Args:
-        user_id: The user to notify.
-    """
-    await asyncio.sleep(NOTIFICATION_TEST_DELAY_SECONDS)
-    await push_service.notify(
-        user_id,
-        "NightForge",
-        "Notification de test 🌙",
-        "/dashboard/chat",
-    )
-
-
 @router.post("/test", response_model=TestNotificationResult)
 async def test_notification(
-    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> Any:
     """
-    Schedule a test notification ~10s out (so the user can lock the phone), and report how many
-    devices are subscribed — a 0 means the subscription never reached the server, which points
-    the problem at the PWA rather than delivery.
+    Send a test notification now and report the delivery outcome. A non-zero ``failed`` with the
+    push service's HTTP status pinpoints the break: a 403/400 is a VAPID/key problem on the
+    server, while ``delivered`` with nothing showing on the phone points at an iOS setting.
 
     Args:
-        background_tasks: FastAPI background runner (fires after the response is sent).
         current_user: The authenticated user.
         db: Database session.
 
     Returns:
-        Whether push is configured, the subscription count, and the delay.
+        Configuration flag, subscription count, delivered/failed counts and any failure detail.
     """
     subscriptions = (
         db.query(PushSubscription).filter(PushSubscription.user_id == current_user.id).count()
     )
-    background_tasks.add_task(_send_test_push_after_delay, current_user.id)
+    result = push_service.send_push(
+        db,
+        current_user.id,
+        "NightForge",
+        "Notification de test 🌙",
+        "/dashboard/chat",
+    )
     return TestNotificationResult(
         configured=push_service.is_configured(),
         subscriptions=subscriptions,
-        delay_seconds=NOTIFICATION_TEST_DELAY_SECONDS,
+        delivered=result.delivered,
+        failed=result.failed,
+        detail="; ".join(result.details)[:300] or None,
     )

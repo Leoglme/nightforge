@@ -35,7 +35,8 @@
     "hintInstall": "On iPhone: add NightForge to your home screen (Share → Add to Home Screen), then reopen it to enable.",
     "errorPermission": "Permission denied — allow notifications in settings.",
     "errorConfig": "Notifications aren't configured on the server.",
-    "testSent": "Test in 10s on {n} device(s) — lock your phone",
+    "testDelivered": "Delivered to {n} device(s) — if nothing shows, check iOS Settings › Notifications",
+    "testRejected": "Push rejected by Apple — VAPID key issue",
     "testNoDevice": "No device subscribed — toggle notifications off then on",
     "testFailed": "Could not send the test"
   },

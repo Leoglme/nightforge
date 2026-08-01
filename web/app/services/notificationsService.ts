@@ -18,11 +18,13 @@ export type PushSubscriptionPayload = {
   user_agent?: string
 }
 
-/** Diagnostic result of a test notification (subscriptions = devices the server will push to). */
+/** Diagnostic result of a test notification (delivered/failed = the push service's verdict). */
 export type TestNotificationResult = {
   configured: boolean
   subscriptions: number
-  delay_seconds: number
+  delivered: number
+  failed: number
+  detail: string | null
 }
 
 /**
