@@ -92,6 +92,10 @@ def _parse_cwd(jsonl_path: Path) -> Optional[str]:
 _DONE_STOP_REASONS = {"end_turn", "stop_sequence", "max_tokens"}
 _CONVERSATIONAL_TYPES = {"assistant", "user"}
 _TAIL_READ_BYTES = 131072
+#: A turn that "looks" unfinished is only really live while Claude is still writing the file.
+#: Past this, it's an interrupted/abandoned session (or one deleted in Claude Code but left on
+#: disk) — never a running one. Generous enough to cover long reasoning pauses and tool runs.
+_ACTIVE_MTIME_THRESHOLD_SECONDS = 420.0
 
 
 def _last_conversational_entry(jsonl_path: Path) -> Optional[dict]:
@@ -147,11 +151,18 @@ def _session_in_progress(jsonl_path: Path) -> bool:
     entry = _last_conversational_entry(jsonl_path)
     if entry is None:
         return False
-    if entry.get("type") == "user":
-        return True
-    message = entry.get("message")
-    stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
-    return stop_reason not in _DONE_STOP_REASONS
+    if entry.get("type") == "assistant":
+        message = entry.get("message")
+        stop_reason = message.get("stop_reason") if isinstance(message, dict) else None
+        if stop_reason in _DONE_STOP_REASONS:
+            return False
+    # A pending tool call, an unanswered user/tool-result, or a streaming block only means
+    # "working" while the transcript is still being written. A stale file is a session that was
+    # interrupted or finished long ago (or deleted in Claude Code) — not a live one.
+    try:
+        return (time.time() - jsonl_path.stat().st_mtime) <= _ACTIVE_MTIME_THRESHOLD_SECONDS
+    except OSError:
+        return False
 
 
 def list_active_session_ids(recent_seconds: float = 3600.0) -> List[str]:
