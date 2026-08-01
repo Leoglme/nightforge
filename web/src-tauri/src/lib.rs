@@ -443,7 +443,25 @@ fn setup_system_tray(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Single instance FIRST: the close button hides to tray (the app never really quits),
+    // so relaunching would otherwise stack a second process. A rival instance's watchdog
+    // respawns the agent right after an update kills it, re-locking nightforge-agent.exe and
+    // failing the NSIS install — the exact reason updates only work after killing everything
+    // in Task Manager. Here a second launch just focuses the existing window.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
