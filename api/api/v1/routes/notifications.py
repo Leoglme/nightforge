@@ -1,9 +1,10 @@
 """
 Web Push notification routes — VAPID key, subscribe/unsubscribe, test.
 """
+import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, BackgroundTasks, Depends, status
 from sqlalchemy.orm import Session
 
 from core.config import settings
@@ -90,22 +91,38 @@ async def unsubscribe(
     db.commit()
 
 
-@router.post("/test", status_code=status.HTTP_204_NO_CONTENT)
-async def test_notification(
-    current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db),
-) -> None:
+#: Delay before the test push fires, so the user can lock the phone and confirm it arrives
+#: as a real background notification (not just an in-app one).
+NOTIFICATION_TEST_DELAY_SECONDS = 10
+
+
+async def _send_test_push_after_delay(user_id: int) -> None:
     """
-    Send a test notification to the current user's devices.
+    Wait, then deliver the test push (own DB session, off the event loop).
 
     Args:
-        current_user: The authenticated user.
-        db: Database session.
+        user_id: The user to notify.
     """
-    push_service.send_push(
-        db,
-        current_user.id,
+    await asyncio.sleep(NOTIFICATION_TEST_DELAY_SECONDS)
+    await push_service.notify(
+        user_id,
         "NightForge",
-        "Notifications activées ✅",
+        "Notification de test 🌙",
         "/dashboard/chat",
     )
+
+
+@router.post("/test", status_code=status.HTTP_204_NO_CONTENT)
+async def test_notification(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_active_user),
+) -> None:
+    """
+    Schedule a test notification ~10s out, so the user can lock the phone and confirm it arrives
+    as a real background push rather than an in-app one.
+
+    Args:
+        background_tasks: FastAPI background runner (fires after the response is sent).
+        current_user: The authenticated user.
+    """
+    background_tasks.add_task(_send_test_push_after_delay, current_user.id)

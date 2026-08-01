@@ -36,7 +36,7 @@
     "hintInstall": "Sur iPhone : ajoute NightForge à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis rouvre-le pour activer.",
     "errorPermission": "Permission refusée — autorise les notifications dans les réglages.",
     "errorConfig": "Notifications non configurées côté serveur.",
-    "testSent": "Notification test envoyée",
+    "testSent": "Notif de test dans 10 s — verrouille ton iPhone",
     "testFailed": "Envoi du test impossible"
   },
   "auth": {
