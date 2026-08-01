@@ -31,6 +31,7 @@
     "test": "Test",
     "unavailable": "Unavailable here",
     "hintDefault": "Get notified when a session finishes, is waiting for you, or fails.",
+    "hintOn": "On — even when the app is closed. Turn off temporarily here if needed.",
     "hintInstall": "On iPhone: add NightForge to your home screen (Share → Add to Home Screen), then reopen it to enable.",
     "errorPermission": "Permission denied — allow notifications in settings.",
     "errorConfig": "Notifications aren't configured on the server.",

@@ -10,19 +10,12 @@
         <span class="truncate text-sm font-medium text-[var(--app-ink)]">{{ t('notifications.title') }}</span>
       </span>
 
-      <template v-if="supported">
-        <div v-if="subscribed" class="flex shrink-0 items-center gap-1.5">
-          <UButton size="xs" color="neutral" variant="ghost" :loading="testing" @click="test">
-            {{ t('notifications.test') }}
-          </UButton>
-          <UButton size="xs" color="neutral" variant="outline" :loading="busy" @click="disable">
-            {{ t('notifications.disable') }}
-          </UButton>
-        </div>
-        <UButton v-else size="xs" color="primary" icon="i-lucide-bell" :loading="busy" @click="enable">
-          {{ t('notifications.enable') }}
+      <div v-if="supported" class="flex shrink-0 items-center gap-2">
+        <UButton v-if="subscribed" size="xs" color="neutral" variant="ghost" :loading="testing" @click="test">
+          {{ t('notifications.test') }}
         </UButton>
-      </template>
+        <USwitch :model-value="subscribed" :disabled="busy" @update:model-value="toggle" />
+      </div>
       <span v-else class="shrink-0 text-xs text-[var(--app-ink-soft)]">{{ t('notifications.unavailable') }}</span>
     </div>
 
@@ -34,11 +27,12 @@
 import { computed, ref } from 'vue'
 
 /**
- * Enable / disable mobile push notifications (session finished, waiting, error, quota).
+ * Notifications switch (dashboard) — enable/disable mobile push for session events.
+ * Notifications auto-enable once permission is granted; this switch turns them off temporarily.
  */
 const { t } = useI18n()
 const toast = useToast()
-const { supported, subscribed, busy, error, enable, disable, sendTest } = useWebPush()
+const { supported, subscribed, busy, error, toggle, sendTest } = useWebPush()
 
 const testing = ref(false)
 
@@ -52,7 +46,7 @@ const hint = computed(() => {
   if (error.value === 'not-configured') {
     return t('notifications.errorConfig')
   }
-  return t('notifications.hintDefault')
+  return subscribed.value ? t('notifications.hintOn') : t('notifications.hintDefault')
 })
 
 /**

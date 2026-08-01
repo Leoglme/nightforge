@@ -1,7 +1,14 @@
 import { onMounted, ref, type Ref } from 'vue'
-import { getVapidKey, subscribePush, testPush, unsubscribePush } from '~/services/notificationsService'
+import { testPush } from '~/services/notificationsService'
+import {
+  isPushSubscribed,
+  isPushSupported,
+  isStandalonePwa,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from '~/utils/webPush'
 
-/** Reactive state and actions for enabling Web Push on the mobile PWA. */
+/** Reactive state and actions for the notifications switch. */
 export type UseWebPush = {
   supported: Ref<boolean>
   standalone: Ref<boolean>
@@ -10,28 +17,13 @@ export type UseWebPush = {
   error: Ref<string | null>
   enable: () => Promise<void>
   disable: () => Promise<void>
+  toggle: (value: boolean) => Promise<void>
   sendTest: () => Promise<void>
 }
 
 /**
- * Decode a base64url VAPID key into the byte array the Push API expects.
- * @param base64 - The base64url application-server key.
- * @returns The decoded bytes.
- */
-function urlBase64ToUint8Array(base64: string): Uint8Array {
-  const padding = '='.repeat((4 - (base64.length % 4)) % 4)
-  const normalized = (base64 + padding).replace(/-/g, '+').replace(/_/g, '/')
-  const raw = atob(normalized)
-  const output = new Uint8Array(raw.length)
-  for (let index = 0; index < raw.length; index += 1) {
-    output[index] = raw.charCodeAt(index)
-  }
-  return output
-}
-
-/**
- * Manage Web Push subscription for the current device.
- * @returns Support flags, subscription state and enable/disable/test actions.
+ * Manage the push subscription for the current device (dashboard switch).
+ * @returns Support flags, subscription state and enable/disable/toggle/test actions.
  */
 export function useWebPush(): UseWebPush {
   const supported = ref(false)
@@ -41,30 +33,20 @@ export function useWebPush(): UseWebPush {
   const error = ref<string | null>(null)
 
   /**
-   * Read the current support / subscription state.
+   * Read current support and subscription state.
    * @returns Nothing.
    */
-  async function refreshState(): Promise<void> {
+  async function refresh(): Promise<void> {
     if (!import.meta.client) {
       return
     }
-    supported.value = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
-    const iosStandalone = (window.navigator as Navigator & { standalone?: boolean }).standalone === true
-    standalone.value = window.matchMedia('(display-mode: standalone)').matches || iosStandalone
-    if (!supported.value) {
-      return
-    }
-    try {
-      const registration = await navigator.serviceWorker.getRegistration()
-      const subscription = registration ? await registration.pushManager.getSubscription() : null
-      subscribed.value = Boolean(subscription) && Notification.permission === 'granted'
-    } catch {
-      subscribed.value = false
-    }
+    supported.value = isPushSupported()
+    standalone.value = isStandalonePwa()
+    subscribed.value = await isPushSubscribed()
   }
 
   /**
-   * Request permission, register the service worker and subscribe to push.
+   * Request permission (the required user gesture) and subscribe.
    * @returns Nothing.
    */
   async function enable(): Promise<void> {
@@ -79,27 +61,11 @@ export function useWebPush(): UseWebPush {
         error.value = 'permission'
         return
       }
-      const vapid = await getVapidKey()
-      if (!vapid.configured || !vapid.public_key) {
+      const ok = await subscribeToPush()
+      if (!ok) {
         error.value = 'not-configured'
         return
       }
-      const registration = await navigator.serviceWorker.register('/sw.js')
-      await navigator.serviceWorker.ready
-      const subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapid.public_key),
-      })
-      const json = subscription.toJSON()
-      if (!json.endpoint || !json.keys?.p256dh || !json.keys?.auth) {
-        error.value = 'subscription'
-        return
-      }
-      await subscribePush({
-        endpoint: json.endpoint,
-        keys: { p256dh: json.keys.p256dh, auth: json.keys.auth },
-        user_agent: navigator.userAgent.slice(0, 400),
-      })
       subscribed.value = true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'error'
@@ -109,7 +75,7 @@ export function useWebPush(): UseWebPush {
   }
 
   /**
-   * Unsubscribe this device from push.
+   * Turn notifications off on this device (temporary — remembered locally).
    * @returns Nothing.
    */
   async function disable(): Promise<void> {
@@ -119,17 +85,25 @@ export function useWebPush(): UseWebPush {
     busy.value = true
     error.value = null
     try {
-      const registration = await navigator.serviceWorker.getRegistration()
-      const subscription = registration ? await registration.pushManager.getSubscription() : null
-      if (subscription) {
-        await unsubscribePush(subscription.endpoint).catch(() => {})
-        await subscription.unsubscribe()
-      }
+      await unsubscribeFromPush()
       subscribed.value = false
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'error'
     } finally {
       busy.value = false
+    }
+  }
+
+  /**
+   * Switch handler.
+   * @param value - Desired on/off state.
+   * @returns Nothing.
+   */
+  async function toggle(value: boolean): Promise<void> {
+    if (value) {
+      await enable()
+    } else {
+      await disable()
     }
   }
 
@@ -141,7 +115,7 @@ export function useWebPush(): UseWebPush {
     await testPush()
   }
 
-  onMounted(refreshState)
+  onMounted(refresh)
 
-  return { supported, standalone, subscribed, busy, error, enable, disable, sendTest }
+  return { supported, standalone, subscribed, busy, error, enable, disable, toggle, sendTest }
 }

@@ -32,6 +32,7 @@
     "test": "Tester",
     "unavailable": "Indispo ici",
     "hintDefault": "Reçois une notif quand une session se termine, t'attend ou échoue.",
+    "hintOn": "Activées — même app fermée. Coupe-les temporairement ici si besoin.",
     "hintInstall": "Sur iPhone : ajoute NightForge à l'écran d'accueil (Partager → Sur l'écran d'accueil), puis rouvre-le pour activer.",
     "errorPermission": "Permission refusée — autorise les notifications dans les réglages.",
     "errorConfig": "Notifications non configurées côté serveur.",

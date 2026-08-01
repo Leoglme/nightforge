@@ -202,6 +202,8 @@
         </li>
       </ul>
     </UCard>
+
+    <NotificationsToggle />
   </div>
 
   <ProjectsManageDrawer :open="projectsOpen" @close="projectsOpen = false" @changed="refreshStats" />
