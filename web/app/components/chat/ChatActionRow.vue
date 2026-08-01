@@ -58,10 +58,22 @@ const showStats = computed(
 const fileCount = computed(() => props.actions.length)
 
 const pathHint = computed(() => {
-  if (props.kind !== 'read' || props.actions.length !== 1) {
+  if (props.actions.length !== 1) {
     return ''
   }
-  return truncatePath(props.actions[0]?.path || '', 36)
+  const path = props.actions[0]?.path || ''
+  if (!path) {
+    return ''
+  }
+  // Single file: show just its name (edit/write) like Claude's "generate-article.vue", or the
+  // truncated path for a read.
+  if (props.kind === 'edit' || props.kind === 'write') {
+    return path.split(/[\\/]/).filter(Boolean).pop() || ''
+  }
+  if (props.kind === 'read') {
+    return truncatePath(path, 36)
+  }
+  return ''
 })
 
 const label = computed(() => {
